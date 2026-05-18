@@ -1,0 +1,119 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 5,
+    "events": [
+        {
+            "audio_file": "p360_007_mic1.flac",
+            "audio_event": "p360",
+            "dataset": "speech",
+            "source_index": 53,
+            "azimuth_deg": -132.749,
+            "elevation_deg": -7.607,
+            "distance_cm": 487.234,
+            "doa_unit_vector": [
+                -0.673,
+                -0.728,
+                -0.132
+            ],
+            "start_time_sec": 2.743,
+            "end_time_sec": 5.655,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p360\\p360_007_mic1.flac",
+            "src_audio_start_sample": 54148,
+            "src_audio_end_sample": 124041,
+            "src_audio_total_duration_sec": 2.912
+        },
+        {
+            "audio_file": "p250_417_mic1.flac",
+            "audio_event": "p250",
+            "dataset": "speech",
+            "source_index": 62,
+            "azimuth_deg": -25.224,
+            "elevation_deg": 9.301,
+            "distance_cm": 256.633,
+            "doa_unit_vector": [
+                0.893,
+                -0.421,
+                0.162
+            ],
+            "start_time_sec": 5.574,
+            "end_time_sec": 7.881,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p250\\p250_417_mic1.flac",
+            "src_audio_start_sample": 1444,
+            "src_audio_end_sample": 56808,
+            "src_audio_total_duration_sec": 2.307
+        },
+        {
+            "audio_file": "p313_249_mic1.flac",
+            "audio_event": "p313",
+            "dataset": "speech",
+            "source_index": 7,
+            "azimuth_deg": -64.634,
+            "elevation_deg": -28.728,
+            "distance_cm": 547.063,
+            "doa_unit_vector": [
+                0.376,
+                -0.792,
+                -0.481
+            ],
+            "start_time_sec": 5.291,
+            "end_time_sec": 8.147,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p313\\p313_249_mic1.flac",
+            "src_audio_start_sample": 42427,
+            "src_audio_end_sample": 110958,
+            "src_audio_total_duration_sec": 2.855
+        },
+        {
+            "audio_file": "p294_419_mic1.flac",
+            "audio_event": "p294",
+            "dataset": "speech",
+            "source_index": 39,
+            "azimuth_deg": 13.07,
+            "elevation_deg": -47.004,
+            "distance_cm": 321.465,
+            "doa_unit_vector": [
+                0.664,
+                0.154,
+                -0.731
+            ],
+            "start_time_sec": 2.498,
+            "end_time_sec": 5.476,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p294\\p294_419_mic1.flac",
+            "src_audio_start_sample": 0,
+            "src_audio_end_sample": 71453,
+            "src_audio_total_duration_sec": 2.977
+        },
+        {
+            "audio_file": "p253_384_mic1.flac",
+            "audio_event": "p253",
+            "dataset": "speech",
+            "source_index": 23,
+            "azimuth_deg": -101.873,
+            "elevation_deg": -10.545,
+            "distance_cm": 496.677,
+            "doa_unit_vector": [
+                -0.202,
+                -0.962,
+                -0.183
+            ],
+            "start_time_sec": 5.724,
+            "end_time_sec": 9.102,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p253\\p253_384_mic1.flac",
+            "src_audio_start_sample": 0,
+            "src_audio_end_sample": 81065,
+            "src_audio_total_duration_sec": 3.378
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\constructionSite_bg10.wav",
+            "rir_position_index": 25,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 11.575
+}

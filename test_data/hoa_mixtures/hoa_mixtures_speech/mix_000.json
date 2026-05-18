@@ -1,0 +1,79 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 3,
+    "events": [
+        {
+            "audio_file": "p364_037_mic1.flac",
+            "audio_event": "p364",
+            "dataset": "speech",
+            "source_index": 20,
+            "azimuth_deg": -137.178,
+            "elevation_deg": -4.803,
+            "distance_cm": 503.092,
+            "doa_unit_vector": [
+                -0.731,
+                -0.677,
+                -0.084
+            ],
+            "start_time_sec": 2.457,
+            "end_time_sec": 5.383,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p364\\p364_037_mic1.flac",
+            "src_audio_start_sample": 0,
+            "src_audio_end_sample": 70238,
+            "src_audio_total_duration_sec": 2.927
+        },
+        {
+            "audio_file": "p233_130_mic1.flac",
+            "audio_event": "p233",
+            "dataset": "speech",
+            "source_index": 62,
+            "azimuth_deg": -25.224,
+            "elevation_deg": 9.301,
+            "distance_cm": 256.633,
+            "doa_unit_vector": [
+                0.893,
+                -0.421,
+                0.162
+            ],
+            "start_time_sec": 3.789,
+            "end_time_sec": 7.524,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p233\\p233_130_mic1.flac",
+            "src_audio_start_sample": 0,
+            "src_audio_end_sample": 89638,
+            "src_audio_total_duration_sec": 3.735
+        },
+        {
+            "audio_file": "p239_277_mic1.flac",
+            "audio_event": "p239",
+            "dataset": "speech",
+            "source_index": 44,
+            "azimuth_deg": -40.324,
+            "elevation_deg": -38.815,
+            "distance_cm": 351.875,
+            "doa_unit_vector": [
+                0.594,
+                -0.504,
+                -0.627
+            ],
+            "start_time_sec": 2.153,
+            "end_time_sec": 5.331,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p239\\p239_277_mic1.flac",
+            "src_audio_start_sample": 2986,
+            "src_audio_end_sample": 79275,
+            "src_audio_total_duration_sec": 3.179
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\constructionSite_bg22.wav",
+            "rir_position_index": 7,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 3.389
+}

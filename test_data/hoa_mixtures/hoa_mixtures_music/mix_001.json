@@ -1,0 +1,99 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 4,
+    "events": [
+        {
+            "audio_file": "mixture.wav",
+            "audio_event": "mixture",
+            "dataset": "music",
+            "source_index": 54,
+            "azimuth_deg": -110.879,
+            "elevation_deg": -9.929,
+            "distance_cm": 497.825,
+            "doa_unit_vector": [
+                -0.351,
+                -0.92,
+                -0.172
+            ],
+            "start_time_sec": 4.487,
+            "end_time_sec": 7.126,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Music Delta - Disco\\mixture.wav",
+            "src_audio_start_sample": 1684600,
+            "src_audio_end_sample": 1747942,
+            "src_audio_total_duration_sec": 2.639
+        },
+        {
+            "audio_file": "bass.wav",
+            "audio_event": "bass",
+            "dataset": "music",
+            "source_index": 45,
+            "azimuth_deg": -23.731,
+            "elevation_deg": -40.381,
+            "distance_cm": 377.655,
+            "doa_unit_vector": [
+                0.697,
+                -0.307,
+                -0.648
+            ],
+            "start_time_sec": 2.977,
+            "end_time_sec": 5.127,
+            "audio_path": "F:/datasets/musdb18hq\\test\\Signe Jakobsen - What Have You Done To Me\\bass.wav",
+            "src_audio_start_sample": 653250,
+            "src_audio_end_sample": 704848,
+            "src_audio_total_duration_sec": 2.15
+        },
+        {
+            "audio_file": "bass.wav",
+            "audio_event": "bass",
+            "dataset": "music",
+            "source_index": 36,
+            "azimuth_deg": -54.352,
+            "elevation_deg": -11.887,
+            "distance_cm": 422.669,
+            "doa_unit_vector": [
+                0.57,
+                -0.795,
+                -0.206
+            ],
+            "start_time_sec": 4.231,
+            "end_time_sec": 8.848,
+            "audio_path": "F:/datasets/musdb18hq\\test\\The Doppler Shift - Atrophy\\bass.wav",
+            "src_audio_start_sample": 7217292,
+            "src_audio_end_sample": 7328112,
+            "src_audio_total_duration_sec": 4.617
+        },
+        {
+            "audio_file": "drums.wav",
+            "audio_event": "drums",
+            "dataset": "music",
+            "source_index": 8,
+            "azimuth_deg": -144.847,
+            "elevation_deg": -37.644,
+            "distance_cm": 499.327,
+            "doa_unit_vector": [
+                -0.647,
+                -0.456,
+                -0.611
+            ],
+            "start_time_sec": 1.494,
+            "end_time_sec": 4.456,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Bill Chudziak - Children Of No-one\\drums.wav",
+            "src_audio_start_sample": 1968433,
+            "src_audio_end_sample": 2039511,
+            "src_audio_total_duration_sec": 2.962
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\constructionSite_bg09.wav",
+            "rir_position_index": 41,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 5.491
+}

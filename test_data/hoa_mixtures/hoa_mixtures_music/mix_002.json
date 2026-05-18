@@ -1,0 +1,79 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 3,
+    "events": [
+        {
+            "audio_file": "drums.wav",
+            "audio_event": "drums",
+            "dataset": "music",
+            "source_index": 46,
+            "azimuth_deg": -95.171,
+            "elevation_deg": -31.982,
+            "distance_cm": 533.28,
+            "doa_unit_vector": [
+                -0.076,
+                -0.845,
+                -0.53
+            ],
+            "start_time_sec": 1.693,
+            "end_time_sec": 8.438,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Clara Berry And Wooldog - Stella\\drums.wav",
+            "src_audio_start_sample": 3353300,
+            "src_audio_end_sample": 3515157,
+            "src_audio_total_duration_sec": 6.744
+        },
+        {
+            "audio_file": "drums.wav",
+            "audio_event": "drums",
+            "dataset": "music",
+            "source_index": 21,
+            "azimuth_deg": -137.933,
+            "elevation_deg": -13.158,
+            "distance_cm": 362.954,
+            "doa_unit_vector": [
+                -0.723,
+                -0.652,
+                -0.228
+            ],
+            "start_time_sec": 1.263,
+            "end_time_sec": 6.372,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Actions - One Minute Smile\\drums.wav",
+            "src_audio_start_sample": 1489826,
+            "src_audio_end_sample": 1612444,
+            "src_audio_total_duration_sec": 5.109
+        },
+        {
+            "audio_file": "other.wav",
+            "audio_event": "other",
+            "dataset": "music",
+            "source_index": 35,
+            "azimuth_deg": -26.041,
+            "elevation_deg": -48.599,
+            "distance_cm": 358.986,
+            "doa_unit_vector": [
+                0.594,
+                -0.29,
+                -0.75
+            ],
+            "start_time_sec": 1.679,
+            "end_time_sec": 7.516,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Grants - PunchDrunk\\other.wav",
+            "src_audio_start_sample": 1723424,
+            "src_audio_end_sample": 1863528,
+            "src_audio_total_duration_sec": 5.838
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\constructionSite_bg19.wav",
+            "rir_position_index": 35,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 16.548
+}

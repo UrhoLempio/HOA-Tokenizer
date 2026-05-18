@@ -1,0 +1,79 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 3,
+    "events": [
+        {
+            "audio_file": "p267_187_mic1.flac",
+            "audio_event": "p267",
+            "dataset": "speech",
+            "source_index": 22,
+            "azimuth_deg": -82.983,
+            "elevation_deg": -16.834,
+            "distance_cm": 350.4,
+            "doa_unit_vector": [
+                0.117,
+                -0.95,
+                -0.29
+            ],
+            "start_time_sec": 0.845,
+            "end_time_sec": 3.24,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p267\\p267_187_mic1.flac",
+            "src_audio_start_sample": 0,
+            "src_audio_end_sample": 57472,
+            "src_audio_total_duration_sec": 2.395
+        },
+        {
+            "audio_file": "freesound_441792_180081_Baby_Crying_01.WAV",
+            "audio_event": "crying",
+            "dataset": "sfx",
+            "source_index": 44,
+            "azimuth_deg": -40.324,
+            "elevation_deg": -38.815,
+            "distance_cm": 351.875,
+            "doa_unit_vector": [
+                0.594,
+                -0.504,
+                -0.627
+            ],
+            "start_time_sec": 3.8,
+            "end_time_sec": 5.675,
+            "audio_path": "F:/datasets/freesound_unverified\\crying\\freesound_441792_180081_Baby_Crying_01.WAV",
+            "src_audio_start_sample": 1124267,
+            "src_audio_end_sample": 1169264,
+            "src_audio_total_duration_sec": 1.875
+        },
+        {
+            "audio_file": "bass.wav",
+            "audio_event": "bass",
+            "dataset": "music",
+            "source_index": 18,
+            "azimuth_deg": -156.174,
+            "elevation_deg": -30.923,
+            "distance_cm": 430.998,
+            "doa_unit_vector": [
+                -0.785,
+                -0.347,
+                -0.514
+            ],
+            "start_time_sec": 6.838,
+            "end_time_sec": 8.736,
+            "audio_path": "F:/datasets/musdb18hq\\test\\Angels In Amplifiers - I'm Alright\\bass.wav",
+            "src_audio_start_sample": 3846142,
+            "src_audio_end_sample": 3891694,
+            "src_audio_total_duration_sec": 1.898
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\constructionSite_bg09.wav",
+            "rir_position_index": 55,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 4.084
+}

@@ -1,0 +1,119 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 5,
+    "events": [
+        {
+            "audio_file": "drums.wav",
+            "audio_event": "drums",
+            "dataset": "music",
+            "source_index": 42,
+            "azimuth_deg": -143.566,
+            "elevation_deg": -17.134,
+            "distance_cm": 501.072,
+            "doa_unit_vector": [
+                -0.769,
+                -0.568,
+                -0.295
+            ],
+            "start_time_sec": 2.354,
+            "end_time_sec": 3.688,
+            "audio_path": "F:/datasets/musdb18hq\\test\\Moosmusic - Big Dummy Shake\\drums.wav",
+            "src_audio_start_sample": 3677371,
+            "src_audio_end_sample": 3709405,
+            "src_audio_total_duration_sec": 1.335
+        },
+        {
+            "audio_file": "mixture.wav",
+            "audio_event": "mixture",
+            "dataset": "music",
+            "source_index": 17,
+            "azimuth_deg": -78.244,
+            "elevation_deg": -10.475,
+            "distance_cm": 565.314,
+            "doa_unit_vector": [
+                0.2,
+                -0.963,
+                -0.182
+            ],
+            "start_time_sec": 5.359,
+            "end_time_sec": 9.292,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Actions - South Of The Water\\mixture.wav",
+            "src_audio_start_sample": 3860233,
+            "src_audio_end_sample": 3954623,
+            "src_audio_total_duration_sec": 3.933
+        },
+        {
+            "audio_file": "vocals.wav",
+            "audio_event": "vocals",
+            "dataset": "music",
+            "source_index": 48,
+            "azimuth_deg": -108.089,
+            "elevation_deg": -20.048,
+            "distance_cm": 246.305,
+            "doa_unit_vector": [
+                -0.292,
+                -0.893,
+                -0.343
+            ],
+            "start_time_sec": 1.098,
+            "end_time_sec": 4.499,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Night Panther - Fire\\vocals.wav",
+            "src_audio_start_sample": 1920571,
+            "src_audio_end_sample": 2002196,
+            "src_audio_total_duration_sec": 3.401
+        },
+        {
+            "audio_file": "vocals.wav",
+            "audio_event": "vocals",
+            "dataset": "music",
+            "source_index": 5,
+            "azimuth_deg": -79.694,
+            "elevation_deg": -60.212,
+            "distance_cm": 376.577,
+            "doa_unit_vector": [
+                0.089,
+                -0.489,
+                -0.868
+            ],
+            "start_time_sec": 7.136,
+            "end_time_sec": 9.125,
+            "audio_path": "F:/datasets/musdb18hq\\test\\Secretariat - Over The Top\\vocals.wav",
+            "src_audio_start_sample": 2763368,
+            "src_audio_end_sample": 2811098,
+            "src_audio_total_duration_sec": 1.989
+        },
+        {
+            "audio_file": "mixture.wav",
+            "audio_event": "mixture",
+            "dataset": "music",
+            "source_index": 43,
+            "azimuth_deg": -34.591,
+            "elevation_deg": -42.639,
+            "distance_cm": 320.319,
+            "doa_unit_vector": [
+                0.606,
+                -0.418,
+                -0.677
+            ],
+            "start_time_sec": 6.326,
+            "end_time_sec": 9.739,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Swinging Steaks - Lost My Way\\mixture.wav",
+            "src_audio_start_sample": 1704810,
+            "src_audio_end_sample": 1786713,
+            "src_audio_total_duration_sec": 3.413
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\constructionSite_bg11.wav",
+            "rir_position_index": 45,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 17.009
+}

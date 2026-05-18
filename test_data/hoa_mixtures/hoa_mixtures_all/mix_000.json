@@ -1,0 +1,119 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 5,
+    "events": [
+        {
+            "audio_file": "p255_329_mic1.flac",
+            "audio_event": "p255",
+            "dataset": "speech",
+            "source_index": 13,
+            "azimuth_deg": -79.2,
+            "elevation_deg": -42.417,
+            "distance_cm": 495.972,
+            "doa_unit_vector": [
+                0.138,
+                -0.725,
+                -0.675
+            ],
+            "start_time_sec": 0.605,
+            "end_time_sec": 4.99,
+            "audio_path": "F:/datasets/VCTK-Corpus-0.92\\wav48_silence_trimmed\\p255\\p255_329_mic1.flac",
+            "src_audio_start_sample": 9240,
+            "src_audio_end_sample": 114494,
+            "src_audio_total_duration_sec": 4.386
+        },
+        {
+            "audio_file": "freesound_98263_street_violinist_Rade_Jovanovic_Vrcinac.wav",
+            "audio_event": "crowd chatter",
+            "dataset": "sfx",
+            "source_index": 41,
+            "azimuth_deg": -153.032,
+            "elevation_deg": -16.75,
+            "distance_cm": 431.448,
+            "doa_unit_vector": [
+                -0.853,
+                -0.434,
+                -0.288
+            ],
+            "start_time_sec": 1.97,
+            "end_time_sec": 4.996,
+            "audio_path": "F:/datasets/freesound_unverified\\crowd chatter\\freesound_98263_street_violinist_Rade_Jovanovic_Vrcinac.wav",
+            "src_audio_start_sample": 66459,
+            "src_audio_end_sample": 139072,
+            "src_audio_total_duration_sec": 3.026
+        },
+        {
+            "audio_file": "freesound_402960_20170927-053438_motorbike_going_past_in_tropical_Vietnam.wav",
+            "audio_event": "rooster crow",
+            "dataset": "sfx",
+            "source_index": 26,
+            "azimuth_deg": -42.913,
+            "elevation_deg": -12.601,
+            "distance_cm": 481.533,
+            "doa_unit_vector": [
+                0.715,
+                -0.664,
+                -0.218
+            ],
+            "start_time_sec": 1.777,
+            "end_time_sec": 5.081,
+            "audio_path": "F:/datasets/freesound_unverified\\rooster crow\\freesound_402960_20170927-053438_motorbike_going_past_in_tropical_Vietnam.wav",
+            "src_audio_start_sample": 114288,
+            "src_audio_end_sample": 193592,
+            "src_audio_total_duration_sec": 3.304
+        },
+        {
+            "audio_file": "drums.wav",
+            "audio_event": "drums",
+            "dataset": "music",
+            "source_index": 31,
+            "azimuth_deg": -81.627,
+            "elevation_deg": -8.384,
+            "distance_cm": 552.476,
+            "doa_unit_vector": [
+                0.144,
+                -0.979,
+                -0.146
+            ],
+            "start_time_sec": 4.423,
+            "end_time_sec": 9.772,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Matthew Entwistle - Dont You Ever\\drums.wav",
+            "src_audio_start_sample": 2074669,
+            "src_audio_end_sample": 2203033,
+            "src_audio_total_duration_sec": 5.348
+        },
+        {
+            "audio_file": "other.wav",
+            "audio_event": "other",
+            "dataset": "music",
+            "source_index": 49,
+            "azimuth_deg": -121.789,
+            "elevation_deg": -49.749,
+            "distance_cm": 268.673,
+            "doa_unit_vector": [
+                -0.34,
+                -0.549,
+                -0.763
+            ],
+            "start_time_sec": 5.603,
+            "end_time_sec": 9.43,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Wall Of Death - Femme\\other.wav",
+            "src_audio_start_sample": 4436952,
+            "src_audio_end_sample": 4528817,
+            "src_audio_total_duration_sec": 3.828
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\crowd_bg11.wav",
+            "rir_position_index": 33,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 7.211
+}

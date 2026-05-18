@@ -1,0 +1,119 @@
+{
+    "room_id": 0,
+    "fs": 24000,
+    "duration_sec": 10.0,
+    "num_events": 5,
+    "events": [
+        {
+            "audio_file": "freesound_423701_Chaffinch.wav",
+            "audio_event": "bird chirp",
+            "dataset": "sfx",
+            "source_index": 16,
+            "azimuth_deg": -49.8,
+            "elevation_deg": -53.62,
+            "distance_cm": 208.841,
+            "doa_unit_vector": [
+                0.383,
+                -0.453,
+                -0.805
+            ],
+            "start_time_sec": 5.216,
+            "end_time_sec": 7.608,
+            "audio_path": "F:/datasets/freesound_unverified\\bird chirp\\freesound_423701_Chaffinch.wav",
+            "src_audio_start_sample": 2013974,
+            "src_audio_end_sample": 2071377,
+            "src_audio_total_duration_sec": 2.392
+        },
+        {
+            "audio_file": "drums.wav",
+            "audio_event": "drums",
+            "dataset": "music",
+            "source_index": 26,
+            "azimuth_deg": -42.913,
+            "elevation_deg": -12.601,
+            "distance_cm": 481.533,
+            "doa_unit_vector": [
+                0.715,
+                -0.664,
+                -0.218
+            ],
+            "start_time_sec": 3.384,
+            "end_time_sec": 5.156,
+            "audio_path": "F:/datasets/musdb18hq\\train\\Bill Chudziak - Children Of No-one\\drums.wav",
+            "src_audio_start_sample": 2854092,
+            "src_audio_end_sample": 2896612,
+            "src_audio_total_duration_sec": 1.772
+        },
+        {
+            "audio_file": "freesound_154378_door_knock.wav",
+            "audio_event": "door knock",
+            "dataset": "sfx",
+            "source_index": 27,
+            "azimuth_deg": -174.047,
+            "elevation_deg": -12.414,
+            "distance_cm": 320.379,
+            "doa_unit_vector": [
+                -0.971,
+                -0.101,
+                -0.215
+            ],
+            "start_time_sec": 3.156,
+            "end_time_sec": 4.056,
+            "audio_path": "F:/datasets/freesound_unverified\\door knock\\freesound_154378_door_knock.wav",
+            "src_audio_start_sample": 0,
+            "src_audio_end_sample": 21600,
+            "src_audio_total_duration_sec": 0.9
+        },
+        {
+            "audio_file": "freesound_493714_HandClap12.wav",
+            "audio_event": "clap",
+            "dataset": "sfx",
+            "source_index": 53,
+            "azimuth_deg": -132.749,
+            "elevation_deg": -7.607,
+            "distance_cm": 487.234,
+            "doa_unit_vector": [
+                -0.673,
+                -0.728,
+                -0.132
+            ],
+            "start_time_sec": 5.551,
+            "end_time_sec": 6.033,
+            "audio_path": "F:/datasets/freesound_unverified\\clap\\freesound_493714_HandClap12.wav",
+            "src_audio_start_sample": 0,
+            "src_audio_end_sample": 11560,
+            "src_audio_total_duration_sec": 0.482
+        },
+        {
+            "audio_file": "freesound_178531_WaterFaucet01-2.wav",
+            "audio_event": "water running",
+            "dataset": "sfx",
+            "source_index": 22,
+            "azimuth_deg": -82.983,
+            "elevation_deg": -16.834,
+            "distance_cm": 350.4,
+            "doa_unit_vector": [
+                0.117,
+                -0.95,
+                -0.29
+            ],
+            "start_time_sec": 1.204,
+            "end_time_sec": 5.77,
+            "audio_path": "F:/datasets/freesound_unverified\\water running\\freesound_178531_WaterFaucet01-2.wav",
+            "src_audio_start_sample": 87181,
+            "src_audio_end_sample": 196757,
+            "src_audio_total_duration_sec": 4.566
+        }
+    ],
+    "hoa_order": 5,
+    "ambisonics_normalization_scheme": "SN3D",
+    "diffuse_sources": [
+        {
+            "audio_file": "F:/datasets/isolated/Isolated urban sound database/background\\fountain_bg02.wav",
+            "rir_position_index": 32,
+            "late_reverb_only": true,
+            "mixing_time_sec": 0.05
+        }
+    ],
+    "fg_to_diffuse_snr_db": 11.602
+}
