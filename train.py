@@ -2,7 +2,7 @@ import os
 import torch
 import torchaudio
 from model import HOA_WavTokenizer
-from discriminator import DACDiscriminator, DiscriminatorP, DiscriminatorR, MultiPeriodDiscriminator, MultiResolutionDiscriminator
+from discriminator import DACDiscriminator, MultiPeriodDiscriminator, MultiResolutionDiscriminator
 from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, FeatureMatchingLoss, DACGANLoss
 from dataloader import get_dataloaders
 from model import HOA_WavTokenizer
