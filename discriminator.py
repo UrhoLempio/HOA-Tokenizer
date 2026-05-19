@@ -404,7 +404,7 @@ class DiscriminatorR(nn.Module):
             n_fft=n_fft,
             hop_length=hop_length,
             win_length=win_length,
-            window=None,  # interestingly rectangular window kind of works here
+            window=torch.ones(n_fft, device=x.device),  # interestingly rectangular window kind of works here
             center=True,
             return_complex=True,
         ).abs()
