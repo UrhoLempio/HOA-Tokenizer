@@ -212,6 +212,7 @@ __marimo__/
 # Generated files
 checkpoints/
 generator_samples
+logs/
 
 # Test files
 test_data/

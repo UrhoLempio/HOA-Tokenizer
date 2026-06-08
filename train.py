@@ -1,4 +1,6 @@
 import os
+from pathlib import Path
+
 import torch
 import torchaudio
 from model import HOA_WavTokenizer
@@ -6,6 +8,35 @@ from discriminator import DACDiscriminator, MultiPeriodDiscriminator, MultiResol
 from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, FeatureMatchingLoss, DACGANLoss
 from dataloader import get_dataloaders
 from tqdm import tqdm
+from torch.utils.tensorboard import SummaryWriter
+
+
+def validate(model, discriminators, val_loader, mel_loss_fn, device):
+    model.eval()
+    for d in discriminators:
+        d.eval()
+
+    val_losses = []
+    sample_audio = None
+
+    with torch.no_grad():
+        for batch in val_loader:
+            audio_input = batch["audio"].to(device)
+            out = model(audio_input)
+            audio_hat = out["audio"]
+            val_losses.append(mel_loss_fn(audio_hat, audio_input).item())
+            if sample_audio is None:
+                sample_audio = audio_hat[0].detach().cpu()
+
+    model.train()
+    for d in discriminators:
+        d.train()
+
+    if not val_losses:
+        raise RuntimeError("Validation loader is empty.")
+
+    return sum(val_losses) / len(val_losses), sample_audio
+
 
 def main():
     device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -14,6 +45,16 @@ def main():
         "/Volumes/MyBook/hoa_out_speech_shards/train",
         "/Volumes/MyBook/hoa_out_speech_shards/test"
     )
+
+    base_dir = Path(".")
+    checkpoints_dir = base_dir / "checkpoints"
+    samples_dir = base_dir / "generator_samples"
+    val_samples_dir = base_dir / "val_samples"
+    logs_dir = base_dir / "logs"
+    for path in (checkpoints_dir, samples_dir, val_samples_dir, logs_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
 
     # Model
     model = HOA_WavTokenizer().to(device)
@@ -43,9 +84,10 @@ def main():
     opt_disc = torch.optim.AdamW(disc_params, lr=2e-4)
 
     # Checkpoint loading
-    resume_path = "./checkpoints/checkpoint_latest.pt"
+    resume_path = checkpoints_dir / "checkpoint_latest.pt"
+    best_val_loss = float("inf")
 
-    if os.path.exists(resume_path):
+    if resume_path.exists():
         ckpt = torch.load(resume_path, map_location=device)
 
         model.load_state_dict(ckpt["model"])
@@ -57,6 +99,7 @@ def main():
         opt_disc.load_state_dict(ckpt["opt_disc"])
 
         global_step = ckpt["step"]
+        best_val_loss = ckpt.get("best_val_loss", float("inf"))
 
         print(f"✅ Resumed from step {global_step}")
 
@@ -87,6 +130,7 @@ def main():
 
             # match Lightning behavior
             train_discriminator = global_step >= pretrain_mel_steps
+            loss_disc = torch.tensor(0.0, device=device)
 
             # ==================================================
             # DISCRIMINATOR STEP
@@ -209,11 +253,43 @@ def main():
                 print(
                     f"[{global_step}] "
                     f"G: {loss_gen.item():.4f} | "
-                    f"D: {loss_disc.item() if train_discriminator else 0:.4f} | "
+                    f"D: {loss_disc.item():.4f} | "
                     f"Mel: {mel_loss.item():.4f} | "
                     f"Commit: {commit_loss.item():.6f}"
                 )
-            if global_step % 1000 == 0:
+                writer.add_scalar("loss/train_gen", loss_gen.item(), global_step)
+                writer.add_scalar("loss/train_disc", loss_disc.item(), global_step)
+                writer.add_scalar("loss/mel", mel_loss.item(), global_step)
+                writer.add_scalar("loss/commit", commit_loss.item(), global_step)
+                writer.flush()
+
+            if global_step != 0 and global_step % 2000 == 0:
+                val_loss, val_sample = validate(model, discriminators, val_loader, mel_loss_fn, device)
+                writer.add_scalar("loss/val_mel", val_loss, global_step)
+                writer.flush()
+                print(f"[{global_step}] Val mel: {val_loss:.4f}")
+                torchaudio.save(
+                    str(val_samples_dir / f"val_{global_step}.wav"),
+                    val_sample,
+                    24000,
+                )
+
+                if val_loss < best_val_loss:
+                    best_val_loss = val_loss
+                    best_checkpoint = {
+                        "model": model.state_dict(),
+                        "disc_mpd": disc_mpd.state_dict(),
+                        "disc_mrd": disc_mrd.state_dict(),
+                        "disc_dac": disc_dac.state_dict(),
+                        "opt_gen": opt_gen.state_dict(),
+                        "opt_disc": opt_disc.state_dict(),
+                        "step": global_step,
+                        "best_val_loss": best_val_loss,
+                    }
+                    torch.save(best_checkpoint, str(checkpoints_dir / "checkpoint_best.pt"))
+                    print(f"✅ New best validation checkpoint: {best_val_loss:.4f}")
+
+            if global_step != 0 and global_step % 1000 == 0:
                 checkpoint = {
                     "model": model.state_dict(),
                     "disc_mpd": disc_mpd.state_dict(),
@@ -222,16 +298,19 @@ def main():
                     "opt_gen": opt_gen.state_dict(),
                     "opt_disc": opt_disc.state_dict(),
                     "step": global_step,
+                    "best_val_loss": best_val_loss,
                 }
-
-                torch.save(checkpoint, f"./checkpoints/checkpoint_{global_step}.pt")
+                torch.save(checkpoint, str(checkpoints_dir / f"checkpoint_{global_step}.pt"))
+                torch.save(checkpoint, str(checkpoints_dir / "checkpoint_latest.pt"))
                 print(f"✅ Saved checkpoint at step {global_step}")
-            if global_step % 2000 == 0:
+
+            if global_step != 0 and global_step % 2000 == 0:
                 torchaudio.save(
-                    f"./generator_samples/sample_{global_step}.wav",
+                    str(samples_dir / f"sample_{global_step}.wav"),
                     audio_hat[0].detach().cpu(),
-                    24000
+                    24000,
                 )
+
             global_step += 1
 
             # ==================================================
@@ -243,7 +322,7 @@ def main():
                 pbar.set_description(
                     f"G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}"
                 )
-
+    writer.close()
     print("Training completed successfully!")
 
 if __name__ == "__main__":
