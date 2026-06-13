@@ -20,7 +20,12 @@ def validate(model, discriminators, val_loader, mel_loss_fn, device):
     sample_audio = None
 
     with torch.no_grad():
-        for batch in val_loader:
+        # Change to "batch in val_loader" when full validation is needed. 
+        # For now we just want to check if the validation loop runs and produces reasonable output.
+        # This is a speed hack to avoid running the full validation which can be time consuming.
+        for i, batch in enumerate(val_loader):
+            if i > 20:
+                break   
             audio_input = batch["audio"].to(device)
             out = model(audio_input)
             audio_hat = out["audio"]
@@ -185,6 +190,9 @@ def main():
             audio_hat = out["audio"]
             commit_loss = out["commit_loss"]
 
+            audio_input_1d = audio_input.squeeze(1)
+            audio_hat_1d = audio_hat.squeeze(1)
+
             if train_discriminator:
                 # DAC generator loss
                 loss_dac_1, loss_dac_2 = dac_loss.generator_loss(
@@ -261,6 +269,9 @@ def main():
                 writer.add_scalar("loss/train_disc", loss_disc.item(), global_step)
                 writer.add_scalar("loss/mel", mel_loss.item(), global_step)
                 writer.add_scalar("loss/commit", commit_loss.item(), global_step)
+                writer.add_scalar("loss/gen_mp", loss_gen_mp, global_step)
+                writer.add_scalar("loss/gen_mrd", loss_gen_mrd, global_step)
+            if global_step % 200 == 0:    
                 writer.flush()
 
             if global_step != 0 and global_step % 2000 == 0:
@@ -289,7 +300,7 @@ def main():
                     torch.save(best_checkpoint, str(checkpoints_dir / "checkpoint_best.pt"))
                     print(f"✅ New best validation checkpoint: {best_val_loss:.4f}")
 
-            if global_step != 0 and global_step % 1000 == 0:
+            if global_step != 0 and global_step % 5000 == 0:
                 checkpoint = {
                     "model": model.state_dict(),
                     "disc_mpd": disc_mpd.state_dict(),
@@ -302,9 +313,17 @@ def main():
                 }
                 torch.save(checkpoint, str(checkpoints_dir / f"checkpoint_{global_step}.pt"))
                 torch.save(checkpoint, str(checkpoints_dir / "checkpoint_latest.pt"))
+                
+                max_checkpoints = 5
+                all_ckpts = sorted(checkpoints_dir.glob("checkpoint_*.pt"), key=os.path.getmtime)
+
+                if len(all_ckpts) > max_checkpoints:
+                    for ck in all_ckpts[:-max_checkpoints]:
+                        ck.unlink()
+
                 print(f"✅ Saved checkpoint at step {global_step}")
 
-            if global_step != 0 and global_step % 2000 == 0:
+            if global_step != 0 and global_step % 5000 == 0:
                 torchaudio.save(
                     str(samples_dir / f"sample_{global_step}.wav"),
                     audio_hat[0].detach().cpu(),
