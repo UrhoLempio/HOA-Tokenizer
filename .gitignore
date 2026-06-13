@@ -213,6 +213,8 @@ __marimo__/
 checkpoints/
 generator_samples
 logs/
+val_samples/
 
 # Test files
 test_data/
+configs/
