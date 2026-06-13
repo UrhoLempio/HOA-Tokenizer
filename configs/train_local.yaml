@@ -1,0 +1,25 @@
+data:
+  train_dir: /Volumes/MyBook/hoa_out_speech_shards/train
+  val_dir: /Volumes/MyBook/hoa_out_speech_shards/test
+io:
+  checkpoint_dir: ./checkpoints
+  generator_samples_dir: ./generator_samples
+  val_samples_dir: ./val_samples
+  log_dir: ./logs
+training:
+  max_steps: 2000
+  pretrain_mel_steps: 0
+  train_batch_size: 2
+  val_batch_size: 2
+  train_num_workers: 0
+  val_num_workers: 0
+  pin_memory: false
+  lr: 2e-4
+  mel_loss_coeff: 45.0
+  mrd_loss_coeff: 1.0
+  bandwidth: 6.6
+  val_every: 2000
+  save_every: 1000
+  sample_every: 2000
+  max_checkpoints: 5
+  device: auto

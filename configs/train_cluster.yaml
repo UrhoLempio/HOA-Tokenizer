@@ -1,0 +1,25 @@
+data:
+  train_dir: /scratch/project_2013256/lempio/hoa_out_speech_shards/train
+  val_dir: /scratch/project_2013256/lempio/hoa_out_speech_shards/test
+io:
+  checkpoint_dir: /data/checkpoints
+  generator_samples_dir: /data/generator_samples
+  val_samples_dir: /data/val_samples
+  log_dir: /data/logs
+training:
+  max_steps: 100000
+  pretrain_mel_steps: 0
+  train_batch_size: 4
+  val_batch_size: 4
+  train_num_workers: 8
+  val_num_workers: 4
+  pin_memory: true
+  lr: 2e-4
+  mel_loss_coeff: 45.0
+  mrd_loss_coeff: 1.0
+  bandwidth: 6.6
+  val_every: 5000
+  save_every: 5000
+  sample_every: 5000
+  max_checkpoints: 10
+  device: cuda

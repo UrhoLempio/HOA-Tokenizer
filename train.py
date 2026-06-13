@@ -1,3 +1,5 @@
+import argparse
+import json
 import os
 from pathlib import Path
 
@@ -9,6 +11,12 @@ from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, Fe
 from dataloader import get_dataloaders
 from tqdm import tqdm
 from torch.utils.tensorboard import SummaryWriter
+
+try:
+    import yaml
+    _HAS_YAML = True
+except ImportError:
+    _HAS_YAML = False
 
 
 def validate(model, discriminators, val_loader, mel_loss_fn, device):
@@ -43,23 +51,92 @@ def validate(model, discriminators, val_loader, mel_loss_fn, device):
     return sum(val_losses) / len(val_losses), sample_audio
 
 
-def main():
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+def load_config(config_path: Path):
+    if not config_path.exists():
+        raise FileNotFoundError(f"Config file not found: {config_path}")
 
-    train_loader, val_loader = get_dataloaders(
-        "/Volumes/MyBook/hoa_out_speech_shards/train",
-        "/Volumes/MyBook/hoa_out_speech_shards/test"
+    with config_path.open("r") as f:
+        if config_path.suffix in {".yaml", ".yml"}:
+            if not _HAS_YAML:
+                raise RuntimeError(
+                    "YAML config support requires PyYAML. Install it with 'pip install pyyaml'."
+                )
+            return yaml.safe_load(f)
+        return json.load(f)
+
+
+def config_int(config, section, key, default):
+    value = config.get(section, {}).get(key, default)
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Expected integer for {section}.{key}, got {value!r}")
+
+
+def config_float(config, section, key, default):
+    value = config.get(section, {}).get(key, default)
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"Expected float for {section}.{key}, got {value!r}")
+
+
+def config_bool(config, section, key, default):
+    value = config.get(section, {}).get(key, default)
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "yes", "1"}:
+            return True
+        if normalized in {"false", "no", "0"}:
+            return False
+    raise ValueError(f"Expected boolean for {section}.{key}, got {value!r}")
+
+
+def parse_args():
+    parser = argparse.ArgumentParser(description="Train the HOA WavTokenizer from a config file.")
+    parser.add_argument(
+        "config_path",
+        type=str,
+        help="Path to the JSON or YAML config file",
     )
+    return parser.parse_args()
 
-    base_dir = Path(".")
-    checkpoints_dir = base_dir / "checkpoints"
-    samples_dir = base_dir / "generator_samples"
-    val_samples_dir = base_dir / "val_samples"
-    logs_dir = base_dir / "logs"
-    for path in (checkpoints_dir, samples_dir, val_samples_dir, logs_dir):
+
+def main(config):
+    train_dir = config["data"]["train_dir"]
+    val_dir = config["data"]["val_dir"]
+
+    train_batch_size = config_int(config, "training", "train_batch_size", 2)
+    val_batch_size = config_int(config, "training", "val_batch_size", 2)
+    train_num_workers = config_int(config, "training", "train_num_workers", 0)
+    val_num_workers = config_int(config, "training", "val_num_workers", 0)
+    pin_memory = config_bool(config, "training", "pin_memory", True)
+
+    checkpoint_dir = Path(config["io"].get("checkpoint_dir", "./checkpoints"))
+    samples_dir = Path(config["io"].get("generator_samples_dir", "./generator_samples"))
+    val_samples_dir = Path(config["io"].get("val_samples_dir", "./val_samples"))
+    logs_dir = Path(config["io"].get("log_dir", "./logs"))
+    for path in (checkpoint_dir, samples_dir, val_samples_dir, logs_dir):
         path.mkdir(parents=True, exist_ok=True)
 
     writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
+
+    if config["training"].get("device", "auto") == "auto":
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+    else:
+        device = config["training"]["device"]
+
+    train_loader, val_loader = get_dataloaders(
+        train_dir,
+        val_dir,
+        train_batch_size=train_batch_size,
+        train_num_workers=train_num_workers,
+        val_batch_size=val_batch_size,
+        val_num_workers=val_num_workers,
+        pin_memory=pin_memory,
+    )
 
     # Model
     model = HOA_WavTokenizer().to(device)
@@ -82,14 +159,15 @@ def main():
     dac_loss = DACGANLoss(disc_dac).to(device)
 
     # Optimizers
-    opt_gen = torch.optim.AdamW(model.parameters(), lr=2e-4)
+    learning_rate = config_float(config, "training", "lr", 2e-4)
+    opt_gen = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     disc_params = []
     for d in discriminators:    
         disc_params += list(d.parameters())
-    opt_disc = torch.optim.AdamW(disc_params, lr=2e-4)
+    opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
     # Checkpoint loading
-    resume_path = checkpoints_dir / "checkpoint_latest.pt"
+    resume_path = checkpoint_dir / "checkpoint_latest.pt"
     best_val_loss = float("inf")
 
     if resume_path.exists():
@@ -113,10 +191,14 @@ def main():
 
 
 
-    max_steps = 50_000
-    pretrain_mel_steps = 0  # from config
-    mel_loss_coeff = 45
-    mrd_loss_coeff = 1.0
+    max_steps = config_int(config, "training", "max_steps", 50000)
+    pretrain_mel_steps = config_int(config, "training", "pretrain_mel_steps", 0)
+    mel_loss_coeff = config_float(config, "training", "mel_loss_coeff", 45.0)
+    mrd_loss_coeff = config_float(config, "training", "mrd_loss_coeff", 1.0)
+    val_every = config_int(config, "training", "val_every", 2000)
+    save_every = config_int(config, "training", "save_every", 5000)
+    sample_every = config_int(config, "training", "sample_every", save_every)
+    max_checkpoints = config_int(config, "training", "max_checkpoints", 5)
 
     print("Starting training...")
 
@@ -126,7 +208,7 @@ def main():
     pbar = tqdm(total=max_steps)
 
     batch = next(iter(train_loader))
-    print(f"batch['audio'].shape: {batch['audio'].shape}")  # Expecting [B, 1, T] B=batch size, 1=mono, T=number of samples
+    print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, 1, T] B=batch size, 1=mono, T=number of samples")  # Expecting [B, 1, T] B=batch size, 1=mono, T=number of samples
 
 
     while global_step < max_steps:  
@@ -274,7 +356,7 @@ def main():
             if global_step % 200 == 0:    
                 writer.flush()
 
-            if global_step != 0 and global_step % 2000 == 0:
+            if global_step != 0 and global_step % val_every == 0:
                 val_loss, val_sample = validate(model, discriminators, val_loader, mel_loss_fn, device)
                 writer.add_scalar("loss/val_mel", val_loss, global_step)
                 writer.flush()
@@ -297,10 +379,10 @@ def main():
                         "step": global_step,
                         "best_val_loss": best_val_loss,
                     }
-                    torch.save(best_checkpoint, str(checkpoints_dir / "checkpoint_best.pt"))
+                    torch.save(best_checkpoint, str(checkpoint_dir / "checkpoint_best.pt"))
                     print(f"✅ New best validation checkpoint: {best_val_loss:.4f}")
 
-            if global_step != 0 and global_step % 5000 == 0:
+            if global_step != 0 and global_step % save_every == 0:
                 checkpoint = {
                     "model": model.state_dict(),
                     "disc_mpd": disc_mpd.state_dict(),
@@ -311,11 +393,13 @@ def main():
                     "step": global_step,
                     "best_val_loss": best_val_loss,
                 }
-                torch.save(checkpoint, str(checkpoints_dir / f"checkpoint_{global_step}.pt"))
-                torch.save(checkpoint, str(checkpoints_dir / "checkpoint_latest.pt"))
+                torch.save(checkpoint, str(checkpoint_dir / f"checkpoint_{global_step}.pt"))
+                torch.save(checkpoint, str(checkpoint_dir / "checkpoint_latest.pt"))
                 
-                max_checkpoints = 5
-                all_ckpts = sorted(checkpoints_dir.glob("checkpoint_*.pt"), key=os.path.getmtime)
+                all_ckpts = sorted(
+                    [p for p in checkpoint_dir.glob("checkpoint_*.pt") if p.name not in {"checkpoint_latest.pt", "checkpoint_best.pt"}],
+                    key=os.path.getmtime,
+                )
 
                 if len(all_ckpts) > max_checkpoints:
                     for ck in all_ckpts[:-max_checkpoints]:
@@ -323,7 +407,7 @@ def main():
 
                 print(f"✅ Saved checkpoint at step {global_step}")
 
-            if global_step != 0 and global_step % 5000 == 0:
+            if global_step != 0 and global_step % sample_every == 0:
                 torchaudio.save(
                     str(samples_dir / f"sample_{global_step}.wav"),
                     audio_hat[0].detach().cpu(),
@@ -345,4 +429,6 @@ def main():
     print("Training completed successfully!")
 
 if __name__ == "__main__":
-    main()
+    args = parse_args()
+    config = load_config(Path(args.config_path))
+    main(config)

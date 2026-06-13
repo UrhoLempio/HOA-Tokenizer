@@ -33,24 +33,31 @@ def preprocess(sample):
 
     return {"audio": audio}
 
-def get_dataloaders(train_dir, val_dir):
+def get_dataloaders(
+    train_dir,
+    val_dir,
+    train_batch_size=2,
+    train_num_workers=0,
+    val_batch_size=2,
+    val_num_workers=0,
+    pin_memory=True,
+):
     train_shard_paths = glob.glob(f"{train_dir}/*.tar")
-    train_dataset = (    
-        wds.WebDataset(train_shard_paths, 
-            shardshuffle=1000)
-            .map(preprocess)    
-            .shuffle(2000)
-            .repeat()     
-        )
-    
+    train_dataset = (
+        wds.WebDataset(train_shard_paths, shardshuffle=1000)
+        .map(preprocess)
+        .shuffle(2000)
+        .repeat()
+    )
+
     train_loader = DataLoader(
         train_dataset,
-        batch_size=2,
-        num_workers=0, #4
-        pin_memory=True,
-        persistent_workers=False    #true
-    )   
-    
+        batch_size=train_batch_size,
+        num_workers=train_num_workers,
+        pin_memory=pin_memory,
+        persistent_workers=False,
+    )
+
     test_shard_paths = glob.glob(f"{val_dir}/*.tar")
 
     val_dataset = (
@@ -60,9 +67,9 @@ def get_dataloaders(train_dir, val_dir):
 
     val_loader = DataLoader(
         val_dataset,
-        batch_size=2,
-        num_workers=0, #2
-        pin_memory=True
+        batch_size=val_batch_size,
+        num_workers=val_num_workers,
+        pin_memory=pin_memory,
     )
 
     return train_loader, val_loader
