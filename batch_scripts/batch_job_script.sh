@@ -8,10 +8,10 @@
 #SBATCH --mem=32G
 #SBATCH --time=15
 #SBATCH --gres=gpu:v100:1,nvme:10
+
 module purge
 module load pytorch
-
+source /projappl/project_2013256/hoa_tokenizer/bin/activate
 srun python3 train.py configs/train_cluster.yaml
 
 seff $SLURM_JOBID
-sacct -o jobid,reqmem,maxrss,averss,elapsed -j <slurm jobid>
