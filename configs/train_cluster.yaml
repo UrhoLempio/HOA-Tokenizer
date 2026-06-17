@@ -2,10 +2,10 @@ data:
   train_dir: /scratch/project_2013256/lempio/hoa_out_speech_shards/train
   val_dir: /scratch/project_2013256/lempio/hoa_out_speech_shards/test
 io:
-  checkpoint_dir: /data/checkpoints
-  generator_samples_dir: /data/generator_samples
-  val_samples_dir: /data/val_samples
-  log_dir: /data/logs
+  checkpoint_dir: ./data/checkpoints
+  generator_samples_dir: ./data/generator_samples
+  val_samples_dir: ./data/val_samples
+  log_dir: ./data/logs
 training:
   max_steps: 100000
   pretrain_mel_steps: 0

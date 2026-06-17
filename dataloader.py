@@ -7,31 +7,35 @@ import io
 
 num_samples = 240000
 
-def preprocess(sample):
-    audio_bytes = sample["wav"]
-    audio, sr = torchaudio.load(io.BytesIO(audio_bytes))  # [C, T]
+def preprocess(sample):   
+    try:
+        audio_bytes = sample["wav"]
+        audio, sr = torchaudio.load(io.BytesIO(audio_bytes))  # [C, T]
 
-    # ✅ Convert to mono (if needed)
-    if audio.shape[0] > 1:
-        audio = audio.mean(dim=0, keepdim=True)
+        # ✅ Convert to mono (if needed)
+        if audio.shape[0] > 1:
+            audio = audio.mean(dim=0, keepdim=True)
 
-    # ✅ Crop or pad
-    length = audio.shape[1]
+        # ✅ Crop or pad
+        length = audio.shape[1]
 
-    if length > num_samples:
-        start = torch.randint(0, length - num_samples, (1,)).item()
-        audio = audio[:, start:start + num_samples]
+        if length > num_samples:
+            start = torch.randint(0, length - num_samples, (1,)).item()
+            audio = audio[:, start:start + num_samples]
 
-    elif length < num_samples:
-        pad = num_samples - length
-        audio = torch.nn.functional.pad(audio, (0, pad))
+        elif length < num_samples:
+            pad = num_samples - length
+            audio = torch.nn.functional.pad(audio, (0, pad))
 
-    # ✅ if length == num_samples → do nothing
-    else:
-        pad = num_samples - audio.shape[1]
-        audio = torch.nn.functional.pad(audio, (0, pad))
+        # ✅ if length == num_samples → do nothing
+        else:
+            pad = num_samples - audio.shape[1]
+            audio = torch.nn.functional.pad(audio, (0, pad))
 
-    return {"audio": audio}
+        return {"audio": audio}
+    except Exception as e:
+        print(f"Error processing sample: {e}")
+        return None
 
 def get_dataloaders(
     train_dir,
