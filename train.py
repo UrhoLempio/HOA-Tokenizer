@@ -8,9 +8,11 @@ import torchaudio
 from model import HOA_WavTokenizer
 from discriminator import DACDiscriminator, MultiPeriodDiscriminator, MultiResolutionDiscriminator
 from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, FeatureMatchingLoss, DACGANLoss
-from dataloader import get_dataloaders
-from tqdm import tqdm
+from dataloader import get_dataloaders, set_audio_loader
 from torch.utils.tensorboard import SummaryWriter
+
+# Will be set based on config file
+USE_TQDM = False
 
 try:
     import yaml
@@ -128,6 +130,31 @@ def main(config):
     else:
         device = config["training"]["device"]
 
+    # Set audio loader and progress bar based on config
+    global USE_TQDM
+    audio_loader = config.get("env", {}).get("audio_loader", "torchaudio")
+    use_tqdm = config.get("env", {}).get("use_tqdm", True)
+    
+    set_audio_loader(audio_loader)
+    USE_TQDM = use_tqdm
+    
+    # Setup tqdm based on config
+    if USE_TQDM:
+        from tqdm import tqdm
+    else:
+        # Dummy tqdm for cluster (use print instead)
+        class tqdm:
+            def __init__(self, *args, **kwargs):
+                self.total = kwargs.get('total')
+            def update(self, n=1):
+                pass
+            def close(self):
+                pass
+            def __enter__(self):
+                return self
+            def __exit__(self, *args):
+                pass
+
     train_loader, val_loader = get_dataloaders(
         train_dir,
         val_dir,
@@ -202,10 +229,10 @@ def main(config):
 
     print("Starting training...")
 
-
-
-
-    pbar = tqdm(total=max_steps)
+    if USE_TQDM:
+        pbar = tqdm(total=max_steps)
+    else:
+        pbar = None
 
     batch = next(iter(train_loader))
     print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, 1, T] B=batch size, 1=mono, T=number of samples")  # Expecting [B, 1, T] B=batch size, 1=mono, T=number of samples
@@ -419,12 +446,15 @@ def main(config):
             # ==================================================
             # PROGRESS BAR UPDATE
             # ==================================================
-            pbar.update(1)
-
-            if global_step % 100 == 0:
-                pbar.set_description(
-                    f"G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}"
-                )
+            if USE_TQDM:
+                pbar.update(1)
+                if global_step % 100 == 0:
+                    pbar.set_description(
+                        f"G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}"
+                    )
+            else:
+                if global_step % 100 == 0:
+                    print(f"Step {global_step}/{max_steps} | G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}")
     writer.close()
     print("Training completed successfully!")
 

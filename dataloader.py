@@ -2,19 +2,40 @@ from torch.utils.data import DataLoader
 import webdataset as wds
 import glob
 import torch
-import torchaudio
 import io
+
+# Global setting for which audio loader to use
+AUDIO_LOADER = 'torchaudio'  # 'torchaudio' or 'soundfile'
+
+def set_audio_loader(loader_type: str):
+    """Set which audio loader to use: 'torchaudio' or 'soundfile'"""
+    global AUDIO_LOADER
+    if loader_type not in ('torchaudio', 'soundfile'):
+        raise ValueError(f"audio_loader must be 'torchaudio' or 'soundfile', got {loader_type}")
+    AUDIO_LOADER = loader_type
 
 num_samples = 240000
 
 def preprocess(sample):   
     try:
         audio_bytes = sample["wav"]
-        audio, sr = torchaudio.load(io.BytesIO(audio_bytes))  # [C, T]
-
-        # ✅ Convert to mono (if needed)
-        if audio.shape[0] > 1:
-            audio = audio.mean(dim=0, keepdim=True)
+        
+        if AUDIO_LOADER == 'soundfile':
+            import soundfile as sf
+            audio_np, sr = sf.read(io.BytesIO(audio_bytes))  # numpy array [T, C] or [T]
+            # Convert to torch tensor and extract first channel
+            if audio_np.ndim == 1:
+                audio = torch.from_numpy(audio_np).float().unsqueeze(0)  # [1, T]
+            else:
+                audio = torch.from_numpy(audio_np.T).float()  # [C, T]
+                if audio.shape[0] > 1:
+                    audio = audio[0:1, :]  # Keep first channel as [1, T]
+        else:
+            import torchaudio
+            audio, sr = torchaudio.load(io.BytesIO(audio_bytes))  # [C, T]
+            # ✅ Convert to mono (if needed)
+            if audio.shape[0] > 1:
+                audio = audio.mean(dim=0, keepdim=True)
 
         # ✅ Crop or pad
         length = audio.shape[1]

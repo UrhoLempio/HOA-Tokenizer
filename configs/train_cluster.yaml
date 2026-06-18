@@ -1,6 +1,9 @@
 data:
   train_dir: /scratch/project_2013256/lempio/hoa_out_speech_shards/train
   val_dir: /scratch/project_2013256/lempio/hoa_out_speech_shards/test
+env:
+  audio_loader: soundfile  # 'torchaudio' or 'soundfile'
+  use_tqdm: false  # true for tqdm, false for print
 io:
   checkpoint_dir: ./data/checkpoints
   generator_samples_dir: ./data/generator_samples
