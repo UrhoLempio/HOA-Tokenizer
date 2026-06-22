@@ -12,7 +12,7 @@
 module purge
 module load ffmpeg
 module load pytorch/2.6 
-source /projappl/project_2013256/lempio/HOA-Tokenizer/new_env/bin/activate
+source /projappl/project_2013256/lempio/hoa_env1/bin/activate
 
 srun python3 train.py configs/train_cluster.yaml
 
