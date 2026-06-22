@@ -240,6 +240,7 @@ def main(config):
 
     while global_step < max_steps:  
         for batch in train_loader:
+            print(f"Entered training loop step {global_step}", flush=True)
             audio_input = batch["audio"].to(device)  # [B, 1, T]
 
             # match Lightning behavior
@@ -372,7 +373,8 @@ def main(config):
                     f"G: {loss_gen.item():.4f} | "
                     f"D: {loss_disc.item():.4f} | "
                     f"Mel: {mel_loss.item():.4f} | "
-                    f"Commit: {commit_loss.item():.6f}"
+                    f"Commit: {commit_loss.item():.6f}",
+                    flush=True
                 )
                 writer.add_scalar("loss/train_gen", loss_gen.item(), global_step)
                 writer.add_scalar("loss/train_disc", loss_disc.item(), global_step)
@@ -387,7 +389,7 @@ def main(config):
                 val_loss, val_sample = validate(model, discriminators, val_loader, mel_loss_fn, device)
                 writer.add_scalar("loss/val_mel", val_loss, global_step)
                 writer.flush()
-                print(f"[{global_step}] Val mel: {val_loss:.4f}")
+                print(f"[{global_step}] Val mel: {val_loss:.4f}", flush=True)
                 torchaudio.save(
                     str(val_samples_dir / f"val_{global_step}.wav"),
                     val_sample,
@@ -407,7 +409,7 @@ def main(config):
                         "best_val_loss": best_val_loss,
                     }
                     torch.save(best_checkpoint, str(checkpoint_dir / "checkpoint_best.pt"))
-                    print(f"✅ New best validation checkpoint: {best_val_loss:.4f}")
+                    print(f"✅ New best validation checkpoint: {best_val_loss:.4f}", flush=True)
 
             if global_step != 0 and global_step % save_every == 0:
                 checkpoint = {
@@ -432,7 +434,7 @@ def main(config):
                     for ck in all_ckpts[:-max_checkpoints]:
                         ck.unlink()
 
-                print(f"✅ Saved checkpoint at step {global_step}")
+                print(f"✅ Saved checkpoint at step {global_step}", flush=True)
 
             if global_step != 0 and global_step % sample_every == 0:
                 torchaudio.save(
@@ -454,7 +456,7 @@ def main(config):
                     )
             else:
                 if global_step % 100 == 0:
-                    print(f"Step {global_step}/{max_steps} | G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}")
+                    print(f"Step {global_step}/{max_steps} | G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}", flush=True)
     writer.close()
     print("Training completed successfully!")
 
