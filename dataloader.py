@@ -68,6 +68,12 @@ def get_dataloaders(
     pin_memory=True,
 ):
     train_shard_paths = glob.glob(f"{train_dir}/*.tar")
+    if not train_shard_paths:
+        raise FileNotFoundError(
+            f"No .tar files found in {train_dir}. "
+            f"Check that the path exists and contains .tar shards."
+        )
+    
     train_dataset = (
         wds.WebDataset(train_shard_paths, shardshuffle=1000)
         .map(preprocess)
@@ -84,6 +90,11 @@ def get_dataloaders(
     )
 
     test_shard_paths = glob.glob(f"{val_dir}/*.tar")
+    if not test_shard_paths:
+        raise FileNotFoundError(
+            f"No .tar files found in {val_dir}. "
+            f"Check that the path exists and contains .tar shards."
+        )
 
     val_dataset = (
         wds.WebDataset(test_shard_paths, shardshuffle=False)
