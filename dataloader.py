@@ -6,6 +6,8 @@ import io
 
 # Global setting for which audio loader to use
 AUDIO_LOADER = 'torchaudio'  # 'torchaudio' or 'soundfile'
+TARGET_CHANNELS = 1
+
 
 def set_audio_loader(loader_type: str):
     """Set which audio loader to use: 'torchaudio' or 'soundfile'"""
@@ -14,28 +16,34 @@ def set_audio_loader(loader_type: str):
         raise ValueError(f"audio_loader must be 'torchaudio' or 'soundfile', got {loader_type}")
     AUDIO_LOADER = loader_type
 
+
+def set_target_channels(num_channels: int):
+    """Set how many channels to load from each audio file."""
+    global TARGET_CHANNELS
+    TARGET_CHANNELS = max(1, int(num_channels))
+
+
 num_samples = 240000
 
-def preprocess(sample):   
+
+def preprocess(sample, target_channels: int = 1):   
     try:
         audio_bytes = sample["wav"]
+        target_channels = max(1, int(target_channels))
         
         if AUDIO_LOADER == 'soundfile':
             import soundfile as sf
             audio_np, sr = sf.read(io.BytesIO(audio_bytes))  # numpy array [T, C] or [T]
-            # Convert to torch tensor and extract first channel
             if audio_np.ndim == 1:
                 audio = torch.from_numpy(audio_np).float().unsqueeze(0)  # [1, T]
             else:
                 audio = torch.from_numpy(audio_np.T).float()  # [C, T]
-                if audio.shape[0] > 1:
-                    audio = audio[0:1, :]  # Keep first channel as [1, T]
+                audio = audio[:target_channels, :]  # Take first target_channels
         else:
             import torchaudio
             audio, sr = torchaudio.load(io.BytesIO(audio_bytes))  # [C, T]
-            # ✅ Convert to mono (if needed)
-            if audio.shape[0] > 1:
-                audio = audio.mean(dim=0, keepdim=True)
+            audio = audio.float()
+            audio = audio[:target_channels, :]  # Take first target_channels
 
         # ✅ Crop or pad
         length = audio.shape[1]
@@ -66,6 +74,7 @@ def get_dataloaders(
     val_batch_size=2,
     val_num_workers=0,
     pin_memory=True,
+    target_channels=1,
 ):
     train_shard_paths = glob.glob(f"{train_dir}/*.tar")
     if not train_shard_paths:
@@ -76,7 +85,7 @@ def get_dataloaders(
     
     train_dataset = (
         wds.WebDataset(train_shard_paths, shardshuffle=1000)
-        .map(preprocess)
+        .map(lambda sample: preprocess(sample, target_channels=target_channels))
         .shuffle(2000)
         .repeat()
     )
@@ -98,7 +107,7 @@ def get_dataloaders(
 
     val_dataset = (
         wds.WebDataset(test_shard_paths, shardshuffle=False)
-        .map(preprocess)
+        .map(lambda sample: preprocess(sample, target_channels=target_channels))
     )
 
     val_loader = DataLoader(

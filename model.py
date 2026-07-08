@@ -9,15 +9,16 @@ import torch.nn as nn
 # Change the arguments keep structure similar
 
 class HOA_WavTokenizer(nn.Module):
-    def __init__(self):
+    def __init__(self, in_channels: int = 1):
         super().__init__()
+        self.in_channels = max(1, int(in_channels))
         self.encoder = SEANetEncoder(causal=False, 
                                     n_residual_layers=1, 
                                     norm='weight_norm', 
                                     pad_mode='reflect', 
                                     lstm=2,
                                     dimension=512, 
-                                    channels=1, 
+                                    channels=self.in_channels, 
                                     n_filters=32, 
                                     ratios=[8, 5, 4, 2], 
                                     activation='ELU',
@@ -50,7 +51,7 @@ class HOA_WavTokenizer(nn.Module):
 
         decoded = self.decoder(vq_result.quantized)
         audio = self.head(decoded)
-        if audio.dim() == 2:    
+        if audio.dim() == 2:
             audio = audio.unsqueeze(1)
         return {
             "audio": audio,

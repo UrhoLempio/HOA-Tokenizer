@@ -8,10 +8,11 @@ import torchaudio
 from model import HOA_WavTokenizer
 from discriminator import DACDiscriminator, MultiPeriodDiscriminator, MultiResolutionDiscriminator
 from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, FeatureMatchingLoss, DACGANLoss
-from dataloader import get_dataloaders, set_audio_loader
+from dataloader import get_dataloaders, set_audio_loader, set_target_channels
+from SpatialConsistency import SpatialConsistency
 from torch.utils.tensorboard import SummaryWriter
 
-# Will be set based on config file
+# TQDM switch since cluster terminals may not support it. Use config to set this.
 USE_TQDM = False
 
 try:
@@ -110,6 +111,7 @@ def main(config):
     train_dir = config["data"]["train_dir"]
     val_dir = config["data"]["val_dir"]
 
+    in_channels = config_int(config, "model", "in_channels", 4)
     train_batch_size = config_int(config, "training", "train_batch_size", 2)
     val_batch_size = config_int(config, "training", "val_batch_size", 2)
     train_num_workers = config_int(config, "training", "train_num_workers", 0)
@@ -132,28 +134,16 @@ def main(config):
 
     # Set audio loader and progress bar based on config
     global USE_TQDM
+    # set audio loader to torchaudio or soundfile based on config
     audio_loader = config.get("env", {}).get("audio_loader", "torchaudio")
     use_tqdm = config.get("env", {}).get("use_tqdm", True)
     
     set_audio_loader(audio_loader)
+    set_target_channels(in_channels)
     USE_TQDM = use_tqdm
     
-    # Setup tqdm based on config
     if USE_TQDM:
         from tqdm import tqdm
-    else:
-        # Dummy tqdm for cluster (use print instead)
-        class tqdm:
-            def __init__(self, *args, **kwargs):
-                self.total = kwargs.get('total')
-            def update(self, n=1):
-                pass
-            def close(self):
-                pass
-            def __enter__(self):
-                return self
-            def __exit__(self, *args):
-                pass
 
     train_loader, val_loader = get_dataloaders(
         train_dir,
@@ -163,10 +153,12 @@ def main(config):
         val_batch_size=val_batch_size,
         val_num_workers=val_num_workers,
         pin_memory=pin_memory,
+        target_channels=in_channels,
     )
 
     # Model
-    model = HOA_WavTokenizer().to(device)
+    model = HOA_WavTokenizer(in_channels=in_channels).to(device)
+    # optional print of model parameters
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters())
     total_params = count_parameters(model)
@@ -181,6 +173,7 @@ def main(config):
     # Losses 
     mel_loss_fn = MelSpecReconstructionLoss(sample_rate=24000).to(device)
     gen_loss_fn = GeneratorLoss().to(device)
+    spatial_consistency_fn = SpatialConsistency(sample_rate=24000)
     disc_loss_fn = DiscriminatorLoss().to(device)
     feat_match_loss_fn = FeatureMatchingLoss().to(device)
     dac_loss = DACGANLoss(disc_dac).to(device)
@@ -222,6 +215,8 @@ def main(config):
     pretrain_mel_steps = config_int(config, "training", "pretrain_mel_steps", 0)
     mel_loss_coeff = config_float(config, "training", "mel_loss_coeff", 45.0)
     mrd_loss_coeff = config_float(config, "training", "mrd_loss_coeff", 1.0)
+    spatial_loss_coeff = config_float(config, "training", "spatial_loss_coeff", 0.01)
+    spatial_loss_every = config_int(config, "training", "spatial_loss_every", 5)
     val_every = config_int(config, "training", "val_every", 2000)
     save_every = config_int(config, "training", "save_every", 5000)
     sample_every = config_int(config, "training", "sample_every", save_every)
@@ -235,13 +230,14 @@ def main(config):
         pbar = None
 
     batch = next(iter(train_loader))
-    print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, 1, T] B=batch size, 1=mono, T=number of samples")  # Expecting [B, 1, T] B=batch size, 1=mono, T=number of samples
+    # sanity check for batch shape
+    print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
 
 
     while global_step < max_steps:  
         for batch in train_loader:
             print(f"Entered training loop step {global_step}", flush=True)
-            audio_input = batch["audio"].to(device)  # [B, 1, T]
+            audio_input = batch["audio"].to(device)  # [B, C, T]
 
             # match Lightning behavior
             train_discriminator = global_step >= pretrain_mel_steps
@@ -257,33 +253,36 @@ def main(config):
                     out = model(audio_input)
                     audio_hat = out["audio"]
 
-                audio_input_1d = audio_input.squeeze(1)   # [B, 1, T] → [B, T]
-                audio_hat_1d  = audio_hat.squeeze(1)    # [B, 1, T] → [B, T]
+                loss_dac_total = 0.0
+                loss_mp_total = 0.0
+                loss_mrd_total = 0.0
+                for ch in range(audio_input.size(1)):
+                    audio_input_ch = audio_input[:, ch:ch + 1, :]
+                    audio_hat_ch = audio_hat[:, ch:ch + 1, :]
+                    audio_input_1d = audio_input_ch.squeeze(1)
+                    audio_hat_1d = audio_hat_ch.squeeze(1)
 
-                # DAC discriminator loss
-                loss_dac = dac_loss.discriminator_loss(
-                    audio_hat, audio_input
-                )
+                    loss_dac_total += dac_loss.discriminator_loss(audio_hat_ch, audio_input_ch)
 
-                # MPD
-                real_mp, gen_mp, _, _ = disc_mpd(
-                    y=audio_input_1d, y_hat=audio_hat_1d
-                )
-                loss_mp, loss_mp_real, _ = disc_loss_fn(
-                    disc_real_outputs=real_mp,
-                    disc_generated_outputs=gen_mp
-                )
-                loss_mp = loss_mp / len(loss_mp_real)
+                    real_mp, gen_mp, _, _ = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
+                    loss_mp, loss_mp_real, _ = disc_loss_fn(
+                        disc_real_outputs=real_mp,
+                        disc_generated_outputs=gen_mp,
+                    )
+                    loss_mp = loss_mp / len(loss_mp_real)
+                    loss_mp_total += loss_mp
 
-                # MRD
-                real_mrd, gen_mrd, _, _ = disc_mrd(
-                    y=audio_input_1d, y_hat=audio_hat_1d
-                )
-                loss_mrd, loss_mrd_real, _ = disc_loss_fn(
-                    disc_real_outputs=real_mrd,
-                    disc_generated_outputs=gen_mrd
-                )
-                loss_mrd = loss_mrd / len(loss_mrd_real)
+                    real_mrd, gen_mrd, _, _ = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
+                    loss_mrd, loss_mrd_real, _ = disc_loss_fn(
+                        disc_real_outputs=real_mrd,
+                        disc_generated_outputs=gen_mrd,
+                    )
+                    loss_mrd = loss_mrd / len(loss_mrd_real)
+                    loss_mrd_total += loss_mrd
+
+                loss_dac = loss_dac_total / audio_input.size(1)
+                loss_mp = loss_mp_total / audio_input.size(1)
+                loss_mrd = loss_mrd_total / audio_input.size(1)
 
                 # total discriminator loss
                 loss_disc = loss_mp + mrd_loss_coeff * loss_mrd + loss_dac
@@ -300,41 +299,46 @@ def main(config):
             audio_hat = out["audio"]
             commit_loss = out["commit_loss"]
 
-            audio_input_1d = audio_input.squeeze(1)
-            audio_hat_1d = audio_hat.squeeze(1)
-
             if train_discriminator:
-                # DAC generator loss
-                loss_dac_1, loss_dac_2 = dac_loss.generator_loss(
-                    audio_hat,
-                    audio_input
-                )
+                loss_dac_1_total = 0.0
+                loss_dac_2_total = 0.0
+                loss_gen_mp_total = 0.0
+                loss_fm_mp_total = 0.0
+                loss_gen_mrd_total = 0.0
+                loss_fm_mrd_total = 0.0
 
-                # MPD
-                _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(
-                    y=audio_input_1d, y_hat=audio_hat_1d
-                )
+                for ch in range(audio_input.size(1)):
+                    audio_input_ch = audio_input[:, ch:ch + 1, :]
+                    audio_hat_ch = audio_hat[:, ch:ch + 1, :]
+                    audio_input_1d = audio_input_ch.squeeze(1)
+                    audio_hat_1d = audio_hat_ch.squeeze(1)
 
-                loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
-                loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
+                    loss_dac_1, loss_dac_2 = dac_loss.generator_loss(audio_hat_ch, audio_input_ch)
+                    loss_dac_1_total += loss_dac_1
+                    loss_dac_2_total += loss_dac_2
 
-                loss_fm_mp = feat_match_loss_fn(
-                    fmap_r=fmap_rs_mp,
-                    fmap_g=fmap_gs_mp
-                ) / len(fmap_rs_mp)
+                    _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
+                    loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
+                    loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
+                    loss_gen_mp_total += loss_gen_mp
 
-                # MRD
-                _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(
-                    y=audio_input_1d, y_hat=audio_hat_1d
-                )
+                    loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
+                    loss_fm_mp_total += loss_fm_mp
 
-                loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
-                loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
+                    _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
+                    loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
+                    loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
+                    loss_gen_mrd_total += loss_gen_mrd
 
-                loss_fm_mrd = feat_match_loss_fn(
-                    fmap_r=fmap_rs_mrd,
-                    fmap_g=fmap_gs_mrd
-                ) / len(fmap_rs_mrd)
+                    loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
+                    loss_fm_mrd_total += loss_fm_mrd
+
+                loss_dac_1 = loss_dac_1_total / audio_input.size(1)
+                loss_dac_2 = loss_dac_2_total / audio_input.size(1)
+                loss_gen_mp = loss_gen_mp_total / audio_input.size(1)
+                loss_fm_mp = loss_fm_mp_total / audio_input.size(1)
+                loss_gen_mrd = loss_gen_mrd_total / audio_input.size(1)
+                loss_fm_mrd = loss_fm_mrd_total / audio_input.size(1)
 
             else:
                 # pretraining phase
@@ -350,6 +354,18 @@ def main(config):
             mel_loss = mel_loss_fn(audio_hat, audio_input)
 
             # total generator loss
+            spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
+            mask_ratio = torch.zeros((), device=device, dtype=torch.float32)
+
+            if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
+                ref_audio = audio_input.transpose(1, 2)
+                gen_audio = audio_hat.transpose(1, 2)
+
+                spatial_loss, mask_ratio = spatial_consistency_fn.compute_spatial_consistency(
+                    ref_audio,
+                    gen_audio,
+                )
+
             loss_gen = (
                 loss_gen_mp
                 + mrd_loss_coeff * loss_gen_mrd
@@ -359,6 +375,7 @@ def main(config):
                 + 1000 * commit_loss
                 + loss_dac_1
                 + loss_dac_2
+                + spatial_loss_coeff * spatial_loss
             )
 
             loss_gen.backward()
@@ -382,6 +399,17 @@ def main(config):
                 writer.add_scalar("loss/commit", commit_loss.item(), global_step)
                 writer.add_scalar("loss/gen_mp", loss_gen_mp, global_step)
                 writer.add_scalar("loss/gen_mrd", loss_gen_mrd, global_step)
+             
+            if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
+                writer.add_scalar("loss/spatial", spatial_loss.item(), global_step)
+                writer.add_scalar("debug/mask_ratio", mask_ratio.item(), global_step)
+                writer.add_scalar("debug/spatial_weighted",
+                                (spatial_loss_coeff * spatial_loss).item(),
+                                global_step
+                                )
+
+
+
             if global_step % 200 == 0:    
                 writer.flush()
 
