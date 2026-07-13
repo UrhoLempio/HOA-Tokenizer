@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 
+from matplotlib.pylab import rint
 import torch
 import torchaudio
 from model import HOA_WavTokenizer
@@ -29,9 +30,9 @@ def validate(model, discriminators, val_loader, mel_loss_fn, device):
 
     val_losses = []
     sample_audio = None
-
+    sample_source = "unknown"
     with torch.no_grad():
-        # Change to "batch in val_loader" when full validation is needed. 
+        # Change to "batch in val_loader" when full validation is needed.
         # For now we just want to check if the validation loop runs and produces reasonable output.
         # This is a speed hack to avoid running the full validation which can be time consuming.
         for i, batch in enumerate(val_loader):
@@ -43,6 +44,7 @@ def validate(model, discriminators, val_loader, mel_loss_fn, device):
             val_losses.append(mel_loss_fn(audio_hat, audio_input).item())
             if sample_audio is None:
                 sample_audio = audio_hat[0].detach().cpu()
+                sample_source = batch["source"][0]
 
     model.train()
     for d in discriminators:
@@ -51,7 +53,7 @@ def validate(model, discriminators, val_loader, mel_loss_fn, device):
     if not val_losses:
         raise RuntimeError("Validation loader is empty.")
 
-    return sum(val_losses) / len(val_losses), sample_audio
+    return sum(val_losses) / len(val_losses), sample_audio, sample_source
 
 
 def load_config(config_path: Path):
@@ -187,10 +189,15 @@ def main(config):
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
     # Checkpoint loading
-    resume_path = checkpoint_dir / "checkpoint_latest.pt"
+    resume_path = None
+    for candidate in sorted(checkpoint_dir.glob("checkpoint_*.pt"), key=lambda p: p.stat().st_mtime, reverse=True):
+        if candidate.name.startswith("checkpoint_best"):
+            continue
+        resume_path = candidate
+        break
     best_val_loss = float("inf")
 
-    if resume_path.exists():
+    if resume_path is not None and resume_path.exists():
         ckpt = torch.load(resume_path, map_location=device)
 
         model.load_state_dict(ckpt["model"])
@@ -252,7 +259,8 @@ def main(config):
                 with torch.no_grad():
                     out = model(audio_input)
                     audio_hat = out["audio"]
-
+                    print(f"audio_input.shape = {audio_input.shape}")
+                    print(f"audio_hat.shape   = {audio_hat.shape}")
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
@@ -298,6 +306,8 @@ def main(config):
             out = model(audio_input, bandwidth=6.6)
             audio_hat = out["audio"]
             commit_loss = out["commit_loss"]
+            print("audio_input.shape =", audio_input.shape)
+            print("audio_hat.shape   =", audio_hat.shape)
 
             if train_discriminator:
                 loss_dac_1_total = 0.0
@@ -414,12 +424,12 @@ def main(config):
                 writer.flush()
 
             if global_step != 0 and global_step % val_every == 0:
-                val_loss, val_sample = validate(model, discriminators, val_loader, mel_loss_fn, device)
+                val_loss, val_sample, val_reference_fname = validate(model, discriminators, val_loader, mel_loss_fn, device)
                 writer.add_scalar("loss/val_mel", val_loss, global_step)
                 writer.flush()
                 print(f"[{global_step}] Val mel: {val_loss:.4f}", flush=True)
                 torchaudio.save(
-                    str(val_samples_dir / f"val_{global_step}.wav"),
+                    str(val_samples_dir / f"val_{global_step}_{val_reference_fname}.wav"),
                     val_sample,
                     24000,
                 )
@@ -436,7 +446,7 @@ def main(config):
                         "step": global_step,
                         "best_val_loss": best_val_loss,
                     }
-                    torch.save(best_checkpoint, str(checkpoint_dir / "checkpoint_best.pt"))
+                    torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best_{global_step}.pt"))
                     print(f"✅ New best validation checkpoint: {best_val_loss:.4f}", flush=True)
 
             if global_step != 0 and global_step % save_every == 0:
@@ -451,10 +461,9 @@ def main(config):
                     "best_val_loss": best_val_loss,
                 }
                 torch.save(checkpoint, str(checkpoint_dir / f"checkpoint_{global_step}.pt"))
-                torch.save(checkpoint, str(checkpoint_dir / "checkpoint_latest.pt"))
-                
+
                 all_ckpts = sorted(
-                    [p for p in checkpoint_dir.glob("checkpoint_*.pt") if p.name not in {"checkpoint_latest.pt", "checkpoint_best.pt"}],
+                    [p for p in checkpoint_dir.glob("checkpoint_*.pt") if not p.name.startswith("checkpoint_best")],
                     key=os.path.getmtime,
                 )
 

@@ -6,7 +6,7 @@ import io
 
 # Global setting for which audio loader to use
 AUDIO_LOADER = 'torchaudio'  # 'torchaudio' or 'soundfile'
-TARGET_CHANNELS = 1
+TARGET_CHANNELS = 4
 
 
 def set_audio_loader(loader_type: str):
@@ -23,13 +23,14 @@ def set_target_channels(num_channels: int):
     TARGET_CHANNELS = max(1, int(num_channels))
 
 
-num_samples = 240000
+num_samples = 12800 #240000
 
 
-def preprocess(sample, target_channels: int = 1):   
+def preprocess(sample, target_channels: int = 4):   
     try:
         audio_bytes = sample["wav"]
         target_channels = max(1, int(target_channels))
+        source_id = sample["__key__"] if "__key__" in sample else None
         
         if AUDIO_LOADER == 'soundfile':
             import soundfile as sf
@@ -44,7 +45,6 @@ def preprocess(sample, target_channels: int = 1):
             audio, sr = torchaudio.load(io.BytesIO(audio_bytes))  # [C, T]
             audio = audio.float()
             audio = audio[:target_channels, :]  # Take first target_channels
-
         # ✅ Crop or pad
         length = audio.shape[1]
 
@@ -61,10 +61,13 @@ def preprocess(sample, target_channels: int = 1):
             pad = num_samples - audio.shape[1]
             audio = torch.nn.functional.pad(audio, (0, pad))
 
-        return {"audio": audio}
+        return {"audio": audio, "source": source_id}
     except Exception as e:
         print(f"Error processing sample: {e}")
         return None
+
+def preprocess_target_channels(sample):
+    return preprocess(sample, target_channels=TARGET_CHANNELS)
 
 def get_dataloaders(
     train_dir,
@@ -74,7 +77,7 @@ def get_dataloaders(
     val_batch_size=2,
     val_num_workers=0,
     pin_memory=True,
-    target_channels=1,
+    target_channels=4,
 ):
     train_shard_paths = glob.glob(f"{train_dir}/*.tar")
     if not train_shard_paths:
@@ -85,7 +88,7 @@ def get_dataloaders(
     
     train_dataset = (
         wds.WebDataset(train_shard_paths, shardshuffle=1000)
-        .map(lambda sample: preprocess(sample, target_channels=target_channels))
+        .map(preprocess_target_channels)
         .shuffle(2000)
         .repeat()
     )
@@ -107,7 +110,7 @@ def get_dataloaders(
 
     val_dataset = (
         wds.WebDataset(test_shard_paths, shardshuffle=False)
-        .map(lambda sample: preprocess(sample, target_channels=target_channels))
+        .map(preprocess_target_channels)
     )
 
     val_loader = DataLoader(
@@ -118,3 +121,20 @@ def get_dataloaders(
     )
 
     return train_loader, val_loader
+
+def main():
+    "Main function to test the dataloader functionality."
+    data_dir = "/Volumes/MyBook/hoa_out_speech_shards/train/"
+    train_loader, val_loader = get_dataloaders(
+        train_dir=data_dir,
+        val_dir=data_dir,
+        train_batch_size=2,
+        val_batch_size=2,
+    )
+    print("Train loader and validation loader created successfully.")
+    sample = next(iter(train_loader))
+    print("Sample keys from train loader:", sample.keys())
+    print("sample['__key__']:", sample['__key__'])
+
+if __name__ == "__main__":
+    main()

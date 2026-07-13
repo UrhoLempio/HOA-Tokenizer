@@ -418,9 +418,10 @@ class ISTFTHead(FourierHead):
         padding (str, optional): Type of padding. Options are "center" or "same". Defaults to "same".
     """
 
-    def __init__(self, dim: int, n_fft: int, hop_length: int, padding: str = "same"):
+    def __init__(self, dim: int, n_fft: int, hop_length: int, padding: str = "same", n_channels: int = 4):
         super().__init__()
-        out_dim = n_fft + 2
+        self.n_channels = n_channels
+        out_dim = (n_fft + 2) * n_channels
         self.out = torch.nn.Linear(dim, out_dim)
         self.istft = ISTFT(n_fft=n_fft, hop_length=hop_length, win_length=n_fft, padding=padding)
 
@@ -433,22 +434,23 @@ class ISTFTHead(FourierHead):
                         L is the sequence length, and H denotes the model dimension.
 
         Returns:
-            Tensor: Reconstructed time-domain audio signal of shape (B, T), where T is the length of the output signal.
+            Tensor: Reconstructed time-domain audio signal of shape (B, C, T), where C is the number of output channels.
         """
         x = self.out(x).transpose(1, 2)
-        mag, p = x.chunk(2, dim=1)
-        mag = torch.exp(mag)
-        mag = torch.clip(mag, max=1e2)  # safeguard to prevent excessively large magnitudes
-        # wrapping happens here. These two lines produce real and imaginary value
-        x = torch.cos(p)
-        y = torch.sin(p)
-        # recalculating phase here does not produce anything new
-        # only costs time
-        # phase = torch.atan2(y, x)
-        # S = mag * torch.exp(phase * 1j)
-        # better directly produce the complex value 
-        S = mag * (x + 1j * y)
-        audio = self.istft(S)
+        x = x.view(x.size(0), self.n_channels, -1, x.size(2))
+
+        channel_audio = []
+        for channel_idx in range(self.n_channels):
+            channel_spec = x[:, channel_idx]
+            mag, p = channel_spec.chunk(2, dim=1)
+            mag = torch.exp(mag)
+            mag = torch.clip(mag, max=1e2)
+            real = torch.cos(p)
+            imag = torch.sin(p)
+            spec = mag * (real + 1j * imag)
+            channel_audio.append(self.istft(spec))
+
+        audio = torch.stack(channel_audio, dim=1)
         return audio
 
 

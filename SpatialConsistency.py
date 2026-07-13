@@ -221,7 +221,8 @@ class SpatialConsistency:
         X = stft_frames[..., 3]
 
         XYZ = torch.stack([X, Y, Z], dim=-1)
-        XYZ = XYZ * torch.sqrt(torch.tensor(3.0, device=XYZ.device, dtype=XYZ.dtype))
+        #XYZ = XYZ * torch.sqrt(torch.tensor(3.0, device=XYZ.device, dtype=XYZ.dtype))
+        XYZ = XYZ * (3.0 ** 0.5)
 
         intensity_vectors = torch.real(torch.conj(W).unsqueeze(-1) * XYZ)
         energy = torch.abs(W)**2 + torch.sum(torch.abs(XYZ)**2, dim=-1) / 2.0
@@ -295,7 +296,7 @@ class SpatialConsistency:
 
         cosine_sim = torch.zeros_like(dot_products)
         denom = torch.clamp(ref_norm * target_norm, min=eps)
-        cosine_sim = torch.where(valid_mask, dot_products / (denom + eps), cosine_sim)
+        cosine_sim = torch.where(valid_mask, dot_products / denom, cosine_sim)
         cosine_sim = torch.clamp(cosine_sim, -1.0, 1.0)
 
         weights = torch.ones_like(ref_energy)
@@ -356,10 +357,10 @@ class SpatialConsistency:
         if total_weight == 0:
             return _maybe_to_python_scalar(rand_azi), _maybe_to_python_scalar(rand_ele), None
 
-        avg_intensity = torch.sum(intensity_vectors * weights[..., None], dim=(0, 1)) / total_weight
+        avg_intensity = torch.sum(intensity_vectors * weights[..., None], dim=(0, 1, 2)) / total_weight
         squared_diff = (intensity_vectors - avg_intensity[None, None, :])**2
         weighted_squared_diff = squared_diff * weights[..., None]
-        variance = torch.sum(weighted_squared_diff, dim=(0, 1)) / total_weight
+        variance = torch.sum(weighted_squared_diff, dim=(0, 1, 2)) / total_weight
         avg_intensity_variance = torch.sum(variance)
 
         x, y, z = avg_intensity[0], avg_intensity[1], avg_intensity[2]
@@ -460,11 +461,18 @@ def estimate_direction_of_arrival(audio_signal: torch.Tensor,
 
 
 if __name__ == "__main__":
-    torch.manual_seed(42)
+    torch.manual_seed(1234)
     n_samples = 8192
     reference = torch.randn(n_samples, 4)
     target = reference + 0.01 * torch.randn(n_samples, 4)
 
     calculator = SpatialConsistency()
-    loss = calculator.compute_spatial_consistency(reference, target)
-    print(f"Torch-only demo loss: {loss.item():.4f}")
+    loss, mask_ratio = calculator.compute_spatial_consistency(
+    reference,
+    target,
+)
+
+    print(f"loss={loss.item():.4f}")
+    print(f"mask_ratio={mask_ratio.item():.4f}")
+
+    

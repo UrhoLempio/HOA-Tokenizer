@@ -42,7 +42,8 @@ class HOA_WavTokenizer(nn.Module):
         
         self.head = ISTFTHead(dim=768, 
                             n_fft=1280, 
-                            hop_length=320)
+                            hop_length=320,
+                            n_channels=self.in_channels)
 
     def forward(self, x, bandwidth=6.6):
         z = self.encoder(x)
@@ -53,6 +54,9 @@ class HOA_WavTokenizer(nn.Module):
         audio = self.head(decoded)
         if audio.dim() == 2:
             audio = audio.unsqueeze(1)
+        print(f"z.shape: {z.shape}")
+        print(f"vq_result.quantized.shape: {vq_result.quantized.shape}")
+        print(f"decoded.shape: {decoded.shape}")
         return {
             "audio": audio,
             "commit_loss": vq_result.loss,
