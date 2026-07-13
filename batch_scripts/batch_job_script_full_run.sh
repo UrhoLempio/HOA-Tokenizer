@@ -2,7 +2,7 @@
 #SBATCH --job-name=model_test_run
 #SBATCH --account=project_2013256
 #SBATCH --partition=gpu
-#SBATCH --nodes=1
+#SBATCH --nodes=4
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=32G

@@ -2,7 +2,7 @@
 #SBATCH --job-name=myTestJob
 #SBATCH --account=project_2013256
 #SBATCH --partition=gputest
-#SBATCH --nodes=1
+#SBATCH --nodes=8
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=32G
@@ -10,7 +10,6 @@
 #SBATCH --gres=gpu:v100:1,nvme:10
 
 module purge
-module load ffmpeg
 module load pytorch/2.6 
 source /projappl/project_2013256/lempio/hoa_env1/bin/activate
 
