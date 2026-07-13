@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=model_test_run
+#SBATCH --job-name=foa_test_run
 #SBATCH --account=project_2013256
 #SBATCH --partition=gpu
 #SBATCH --nodes=4
@@ -22,4 +22,4 @@ echo "Running on $(hostname)"
 nvidia-smi
 
 # Run training (UNBUFFERED!)
-srun python3 -u train.py configs/train_cluster.yaml
+srun python3 -u train.py configs/train_cluster_foa.yaml
