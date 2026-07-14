@@ -23,7 +23,7 @@ def set_target_channels(num_channels: int):
     TARGET_CHANNELS = max(1, int(num_channels))
 
 
-num_samples = 12800 #240000
+num_samples = 240000 #12800 for quick test, 240000 for full length
 
 
 def preprocess(sample, target_channels: int = 4):   
@@ -87,7 +87,7 @@ def get_dataloaders(
         )
     
     train_dataset = (
-        wds.WebDataset(train_shard_paths, shardshuffle=1000)
+        wds.WebDataset(train_shard_paths, shardshuffle=200) #shardshuffle=1000 for more randomness
         .map(preprocess_target_channels)
         .shuffle(2000)
         .repeat()

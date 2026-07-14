@@ -16,8 +16,8 @@ training:
   pretrain_mel_steps: 5
   train_batch_size: 1
   val_batch_size: 1
-  train_num_workers: 8
-  val_num_workers: 4
+  train_num_workers: 4
+  val_num_workers: 2
   pin_memory: true
   lr: 2e-4
   mel_loss_coeff: 45.0
