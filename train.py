@@ -248,7 +248,7 @@ def main(config):
 
     while global_step < max_steps:  
         for batch in train_loader:
-            print(f"Entered training loop step {global_step}", flush=True)
+            #print(f"Entered training loop step {global_step}", flush=True)
             audio_input = batch["audio"].to(device)  # [B, C, T]
 
             # match Lightning behavior
