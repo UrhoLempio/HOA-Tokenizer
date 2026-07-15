@@ -14,9 +14,9 @@ model:
 training:
   max_steps: 1000
   pretrain_mel_steps: 10
-  train_batch_size: 3
+  train_batch_size: 2
   val_batch_size: 4
-  train_num_workers: 4
+  train_num_workers: 8
   val_num_workers: 2
   pin_memory: true
   lr: 2e-4
