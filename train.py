@@ -275,24 +275,24 @@ def main(config):
                         audio_hat_ch = audio_hat[:, ch:ch + 1, :]
                         audio_input_1d = audio_input_ch.squeeze(1)
                         audio_hat_1d = audio_hat_ch.squeeze(1)
-                        print(
-                            "allocated before DAC:",
-                            torch.cuda.memory_allocated() / 1024**3,
-                            "GB"
-                        )
+                        #print(
+                        #    "allocated before DAC:",
+                        #    torch.cuda.memory_allocated() / 1024**3,
+                        #    "GB"
+                        #)
                         loss_dac_total += dac_loss.discriminator_loss(audio_hat_ch, audio_input_ch)
-                        print(
-                            "allocated after DAC and before MPD:",
-                            torch.cuda.memory_allocated() / 1024**3,
-                            "GB"
-                        )
+                        #print(
+                        #    "allocated after DAC and before MPD:",
+                        #    torch.cuda.memory_allocated() / 1024**3,
+                        #    "GB"
+                        #)
                         
                         real_mp, gen_mp, _, _ = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
-                        print(
-                            "allocated after MPD and before MRD:",
-                            torch.cuda.memory_allocated() / 1024**3,
-                            "GB"
-                        )
+                        #print(
+                        #    "allocated after MPD and before MRD:",
+                        #    torch.cuda.memory_allocated() / 1024**3,
+                        #    "GB"
+                        #)
                         loss_mp, loss_mp_real, _ = disc_loss_fn(
                             disc_real_outputs=real_mp,
                             disc_generated_outputs=gen_mp,
@@ -305,11 +305,11 @@ def main(config):
                             disc_real_outputs=real_mrd,
                             disc_generated_outputs=gen_mrd,
                         )
-                        print(
-                            "allocated after MRD:",
-                            torch.cuda.memory_allocated() / 1024**3,
-                            "GB"
-                        )
+                        #print(
+                        #    "allocated after MRD:",
+                        #    torch.cuda.memory_allocated() / 1024**3,
+                        #    "GB"
+                        #)
                         loss_mrd = loss_mrd / len(loss_mrd_real)
                         loss_mrd_total += loss_mrd
 
@@ -344,10 +344,10 @@ def main(config):
                     loss_fm_mrd_total = 0.0
 
                     for ch in range(audio_input.size(1)):
-                        print(
-                            f"before ch {ch}:",
-                            torch.cuda.memory_allocated() / 1024**3
-                        )
+                        #print(
+                        #    f"before ch {ch}:",
+                        #    torch.cuda.memory_allocated() / 1024**3
+                        #)
                         audio_input_ch = audio_input[:, ch:ch + 1, :]
                         audio_hat_ch = audio_hat[:, ch:ch + 1, :]
                         audio_input_1d = audio_input_ch.squeeze(1)
@@ -372,10 +372,10 @@ def main(config):
 
                         loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
                         loss_fm_mrd_total += loss_fm_mrd
-                        print(
-                            f"after ch {ch}:",
-                            torch.cuda.memory_allocated() / 1024**3
-                        )
+                        #print(
+                        #    f"after ch {ch}:",
+                        #    torch.cuda.memory_allocated() / 1024**3
+                        #)
                     loss_dac_1 = loss_dac_1_total / audio_input.size(1)
                     loss_dac_2 = loss_dac_2_total / audio_input.size(1)
                     loss_gen_mp = loss_gen_mp_total / audio_input.size(1)
