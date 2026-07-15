@@ -191,7 +191,7 @@ def main(config):
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
     # AMP
-    scaler = GradScaler(device=device)
+    scaler = GradScaler(device)
 
     # Checkpoint loading
     resume_path = None
@@ -269,7 +269,7 @@ def main(config):
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
-                with autocast(device=device):
+                with autocast(device_type=device):
                     for ch in range(audio_input.size(1)):
                         audio_input_ch = audio_input[:, ch:ch + 1, :]
                         audio_hat_ch = audio_hat[:, ch:ch + 1, :]
@@ -328,7 +328,7 @@ def main(config):
             # GENERATOR STEP
             # ==================================================
             opt_gen.zero_grad()
-            with autocast(device=device):
+            with autocast(device_type=device):
                 out = model(audio_input, bandwidth=6.6)
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
