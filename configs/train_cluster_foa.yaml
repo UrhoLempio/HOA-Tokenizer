@@ -14,7 +14,7 @@ model:
 training:
   max_steps: 100000
   pretrain_mel_steps: 1000
-  train_batch_size: 1
+  train_batch_size: 2
   val_batch_size: 4
   train_num_workers: 4
   val_num_workers: 2

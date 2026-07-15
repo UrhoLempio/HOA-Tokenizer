@@ -527,7 +527,15 @@ def main(config):
                     )
             else:
                 if global_step % 100 == 0:
-                    print(f"Step {global_step}/{max_steps} | G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}", flush=True)
+                    print(
+                        f"Step {global_step}/{max_steps} | "
+                        f"G:{loss_gen.item():.2f} "
+                        f"D:{loss_disc.item():.2f} "
+                        f"Mel:{mel_loss.item():.4f} "
+                        f"Spatial:{spatial_loss.item():.4f} "
+                        f"Commit:{commit_loss.item():.6f}",
+                        flush=True,
+                    )
     writer.close()
     print("Training completed successfully!")
 
