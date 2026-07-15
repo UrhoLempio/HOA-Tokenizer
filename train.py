@@ -431,10 +431,11 @@ def main(config):
             if global_step % 10 == 0:
                 print(
                     f"[{global_step}] "
-                    f"G: {loss_gen.item():.4f} | "
-                    f"D: {loss_disc.item():.4f} | "
+                    f"Gen: {loss_gen.item():.4f} | "
+                    f"Disc: {loss_disc.item():.4f} | "
                     f"Mel: {mel_loss.item():.4f} | "
-                    f"Commit: {commit_loss.item():.6f}",
+                    f"Commit: {commit_loss.item():.6f} | "
+                    f"Spatial: {spatial_loss.item():.4f} | ",
                     flush=True
                 )
                 writer.add_scalar("loss/train_gen", loss_gen.item(), global_step)
@@ -525,17 +526,17 @@ def main(config):
                     pbar.set_description(
                         f"G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}"
                     )
-            else:
-                if global_step % 100 == 0:
-                    print(
-                        f"Step {global_step}/{max_steps} | "
-                        f"G:{loss_gen.item():.2f} "
-                        f"D:{loss_disc.item():.2f} "
-                        f"Mel:{mel_loss.item():.4f} "
-                        f"Spatial:{spatial_loss.item():.4f} "
-                        f"Commit:{commit_loss.item():.6f}",
-                        flush=True,
-                    )
+            #else:
+            #    if global_step % 100 == 0:
+            #        print(
+            #            f"Step {global_step}/{max_steps} | "
+            #            f"G:{loss_gen.item():.2f} "
+            #            f"D:{loss_disc.item():.2f} "
+            #            f"Mel:{mel_loss.item():.4f} "
+            #            f"Spatial:{spatial_loss.item():.4f} "
+            #            f"Commit:{commit_loss.item():.6f}",
+            #            flush=True,
+            #        )
     writer.close()
     print("Training completed successfully!")
 
