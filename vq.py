@@ -14,6 +14,7 @@ import torch
 from torch import nn
 from einops import rearrange, repeat
 import torch.nn.functional as F
+from torch.amp import autocast
 
 def rank():
     if torch.distributed.is_initialized():
@@ -599,7 +600,8 @@ class ResidualVectorQuantizer(nn.Module):
             n_q=nq_choice[choice]
         # breakpoint()
         # n_q=8
-        quantized, codes, commit_loss = self.vq(x, n_q=n_q)
+        with autocast(device_type="cuda", enabled=False):
+            quantized, codes, commit_loss = self.vq(x, n_q=n_q)
         bw = torch.tensor(n_q * bw_per_q).to(x)
         return QuantizedResult(quantized, codes, bw, loss=torch.mean(commit_loss))
 
@@ -626,7 +628,8 @@ class ResidualVectorQuantizer(nn.Module):
         # # breakpoint()
         #     n_q=nq_choice[choice]
         n_q=1
-        quantized, codes, commit_loss = self.vq(x, n_q=n_q)
+        with autocast(device_type="cuda", enabled=False):
+            quantized, codes, commit_loss = self.vq(x, n_q=n_q)
         bw = torch.tensor(n_q * bw_per_q).to(x)
         return QuantizedResult(quantized, codes, bw, loss=torch.mean(commit_loss))
 

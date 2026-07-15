@@ -434,7 +434,7 @@ def main(config):
                     f"Gen: {loss_gen.item():.4f} | "
                     f"Disc: {loss_disc.item():.4f} | "
                     f"Mel: {mel_loss.item():.4f} | "
-                    f"Commit: {commit_loss.item():.6f} | "
+                    f"Commit: {commit_loss.item():.3e} | "
                     f"Spatial: {spatial_loss.item():.4f} | ",
                     flush=True
                 )
