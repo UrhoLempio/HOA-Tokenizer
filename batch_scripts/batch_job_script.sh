@@ -2,7 +2,7 @@
 #SBATCH --job-name=myTestJob
 #SBATCH --account=project_2013256
 #SBATCH --partition=gputest
-#SBATCH --nodes=8
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=32G

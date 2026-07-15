@@ -2,11 +2,11 @@
 #SBATCH --job-name=foa_test_run
 #SBATCH --account=project_2013256
 #SBATCH --partition=gpu
-#SBATCH --nodes=4
+#SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=32G
-#SBATCH --time=2-0:00:00
+#SBATCH --time=0-01:00:00
 #SBATCH --gres=gpu:v100:1,nvme:10
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.err
