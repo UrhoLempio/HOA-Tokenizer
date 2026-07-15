@@ -12,6 +12,8 @@ from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, Fe
 from dataloader import get_dataloaders, set_audio_loader, set_target_channels
 from SpatialConsistency import SpatialConsistency
 from torch.utils.tensorboard import SummaryWriter
+from torch.amp import autocast, GradScaler
+
 
 # TQDM switch since cluster terminals may not support it. Use config to set this.
 USE_TQDM = False
@@ -188,6 +190,9 @@ def main(config):
         disc_params += list(d.parameters())
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
+    # AMP
+    scaler = GradScaler(device=device)
+
     # Checkpoint loading
     resume_path = None
     for candidate in sorted(checkpoint_dir.glob("checkpoint_*.pt"), key=lambda p: p.stat().st_mtime, reverse=True):
@@ -254,7 +259,7 @@ def main(config):
             # DISCRIMINATOR STEP
             # ==================================================
             if train_discriminator:
-                opt_disc.zero_grad()
+                opt_disc.zero_grad(set_to_none=True)
 
                 with torch.no_grad():
                     out = model(audio_input)
@@ -264,158 +269,161 @@ def main(config):
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
-                for ch in range(audio_input.size(1)):
-                    audio_input_ch = audio_input[:, ch:ch + 1, :]
-                    audio_hat_ch = audio_hat[:, ch:ch + 1, :]
-                    audio_input_1d = audio_input_ch.squeeze(1)
-                    audio_hat_1d = audio_hat_ch.squeeze(1)
-                    print(
-                        "allocated before DAC:",
-                        torch.cuda.memory_allocated() / 1024**3,
-                        "GB"
-                    )
-                    loss_dac_total += dac_loss.discriminator_loss(audio_hat_ch, audio_input_ch)
-                    print(
-                        "allocated after DAC and before MPD:",
-                        torch.cuda.memory_allocated() / 1024**3,
-                        "GB"
-                    )
-                    
-                    real_mp, gen_mp, _, _ = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
-                    print(
-                        "allocated after MPD and before MRD:",
-                        torch.cuda.memory_allocated() / 1024**3,
-                        "GB"
-                    )
-                    loss_mp, loss_mp_real, _ = disc_loss_fn(
-                        disc_real_outputs=real_mp,
-                        disc_generated_outputs=gen_mp,
-                    )
-                    loss_mp = loss_mp / len(loss_mp_real)
-                    loss_mp_total += loss_mp
+                with autocast(device=device):
+                    for ch in range(audio_input.size(1)):
+                        audio_input_ch = audio_input[:, ch:ch + 1, :]
+                        audio_hat_ch = audio_hat[:, ch:ch + 1, :]
+                        audio_input_1d = audio_input_ch.squeeze(1)
+                        audio_hat_1d = audio_hat_ch.squeeze(1)
+                        print(
+                            "allocated before DAC:",
+                            torch.cuda.memory_allocated() / 1024**3,
+                            "GB"
+                        )
+                        loss_dac_total += dac_loss.discriminator_loss(audio_hat_ch, audio_input_ch)
+                        print(
+                            "allocated after DAC and before MPD:",
+                            torch.cuda.memory_allocated() / 1024**3,
+                            "GB"
+                        )
+                        
+                        real_mp, gen_mp, _, _ = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
+                        print(
+                            "allocated after MPD and before MRD:",
+                            torch.cuda.memory_allocated() / 1024**3,
+                            "GB"
+                        )
+                        loss_mp, loss_mp_real, _ = disc_loss_fn(
+                            disc_real_outputs=real_mp,
+                            disc_generated_outputs=gen_mp,
+                        )
+                        loss_mp = loss_mp / len(loss_mp_real)
+                        loss_mp_total += loss_mp
 
-                    real_mrd, gen_mrd, _, _ = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
-                    loss_mrd, loss_mrd_real, _ = disc_loss_fn(
-                        disc_real_outputs=real_mrd,
-                        disc_generated_outputs=gen_mrd,
-                    )
-                    print(
-                        "allocated after MRD:",
-                        torch.cuda.memory_allocated() / 1024**3,
-                        "GB"
-                    )
-                    loss_mrd = loss_mrd / len(loss_mrd_real)
-                    loss_mrd_total += loss_mrd
+                        real_mrd, gen_mrd, _, _ = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
+                        loss_mrd, loss_mrd_real, _ = disc_loss_fn(
+                            disc_real_outputs=real_mrd,
+                            disc_generated_outputs=gen_mrd,
+                        )
+                        print(
+                            "allocated after MRD:",
+                            torch.cuda.memory_allocated() / 1024**3,
+                            "GB"
+                        )
+                        loss_mrd = loss_mrd / len(loss_mrd_real)
+                        loss_mrd_total += loss_mrd
 
-                loss_dac = loss_dac_total / audio_input.size(1)
-                loss_mp = loss_mp_total / audio_input.size(1)
-                loss_mrd = loss_mrd_total / audio_input.size(1)
+                    loss_dac = loss_dac_total / audio_input.size(1)
+                    loss_mp = loss_mp_total / audio_input.size(1)
+                    loss_mrd = loss_mrd_total / audio_input.size(1)
 
-                # total discriminator loss
-                loss_disc = loss_mp + mrd_loss_coeff * loss_mrd + loss_dac
+                    # total discriminator loss
+                    loss_disc = loss_mp + mrd_loss_coeff * loss_mrd + loss_dac
 
-                loss_disc.backward()
-                opt_disc.step()
+                scaler.scale(loss_disc).backward()
+                scaler.step(opt_disc)
+                scaler.update()
 
             # ==================================================
             # GENERATOR STEP
             # ==================================================
             opt_gen.zero_grad()
-
-            out = model(audio_input, bandwidth=6.6)
-            audio_hat = out["audio"]
-            commit_loss = out["commit_loss"]
+            with autocast(device=device):
+                out = model(audio_input, bandwidth=6.6)
+                audio_hat = out["audio"]
+                commit_loss = out["commit_loss"]
             #print("audio_input.shape =", audio_input.shape)
             #print("audio_hat.shape   =", audio_hat.shape)
 
-            if train_discriminator:
-                loss_dac_1_total = 0.0
-                loss_dac_2_total = 0.0
-                loss_gen_mp_total = 0.0
-                loss_fm_mp_total = 0.0
-                loss_gen_mrd_total = 0.0
-                loss_fm_mrd_total = 0.0
+                if train_discriminator:
+                    loss_dac_1_total = 0.0
+                    loss_dac_2_total = 0.0
+                    loss_gen_mp_total = 0.0
+                    loss_fm_mp_total = 0.0
+                    loss_gen_mrd_total = 0.0
+                    loss_fm_mrd_total = 0.0
 
-                for ch in range(audio_input.size(1)):
-                    print(
-                        f"before ch {ch}:",
-                        torch.cuda.memory_allocated() / 1024**3
+                    for ch in range(audio_input.size(1)):
+                        print(
+                            f"before ch {ch}:",
+                            torch.cuda.memory_allocated() / 1024**3
+                        )
+                        audio_input_ch = audio_input[:, ch:ch + 1, :]
+                        audio_hat_ch = audio_hat[:, ch:ch + 1, :]
+                        audio_input_1d = audio_input_ch.squeeze(1)
+                        audio_hat_1d = audio_hat_ch.squeeze(1)
+
+                        loss_dac_1, loss_dac_2 = dac_loss.generator_loss(audio_hat_ch, audio_input_ch)
+                        loss_dac_1_total += loss_dac_1
+                        loss_dac_2_total += loss_dac_2
+
+                        _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
+                        loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
+                        loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
+                        loss_gen_mp_total += loss_gen_mp
+
+                        loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
+                        loss_fm_mp_total += loss_fm_mp
+
+                        _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
+                        loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
+                        loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
+                        loss_gen_mrd_total += loss_gen_mrd
+
+                        loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
+                        loss_fm_mrd_total += loss_fm_mrd
+                        print(
+                            f"after ch {ch}:",
+                            torch.cuda.memory_allocated() / 1024**3
+                        )
+                    loss_dac_1 = loss_dac_1_total / audio_input.size(1)
+                    loss_dac_2 = loss_dac_2_total / audio_input.size(1)
+                    loss_gen_mp = loss_gen_mp_total / audio_input.size(1)
+                    loss_fm_mp = loss_fm_mp_total / audio_input.size(1)
+                    loss_gen_mrd = loss_gen_mrd_total / audio_input.size(1)
+                    loss_fm_mrd = loss_fm_mrd_total / audio_input.size(1)
+
+                else:
+                    # pretraining phase
+                    loss_gen_mp = 0
+                    loss_gen_mrd = 0
+                    loss_fm_mp = 0
+                    loss_fm_mrd = 0
+                    loss_dac_1 = 0
+                    loss_dac_2 = 0
+
+
+                # Mel loss
+                mel_loss = mel_loss_fn(audio_hat, audio_input)
+
+                # total generator loss
+                spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
+                mask_ratio = torch.zeros((), device=device, dtype=torch.float32)
+
+                if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
+                    ref_audio = audio_input.transpose(1, 2)
+                    gen_audio = audio_hat.transpose(1, 2)
+
+                    spatial_loss, mask_ratio = spatial_consistency_fn.compute_spatial_consistency(
+                        ref_audio,
+                        gen_audio,
                     )
-                    audio_input_ch = audio_input[:, ch:ch + 1, :]
-                    audio_hat_ch = audio_hat[:, ch:ch + 1, :]
-                    audio_input_1d = audio_input_ch.squeeze(1)
-                    audio_hat_1d = audio_hat_ch.squeeze(1)
 
-                    loss_dac_1, loss_dac_2 = dac_loss.generator_loss(audio_hat_ch, audio_input_ch)
-                    loss_dac_1_total += loss_dac_1
-                    loss_dac_2_total += loss_dac_2
-
-                    _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
-                    loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
-                    loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
-                    loss_gen_mp_total += loss_gen_mp
-
-                    loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
-                    loss_fm_mp_total += loss_fm_mp
-
-                    _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
-                    loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
-                    loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
-                    loss_gen_mrd_total += loss_gen_mrd
-
-                    loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
-                    loss_fm_mrd_total += loss_fm_mrd
-                    print(
-                        f"after ch {ch}:",
-                        torch.cuda.memory_allocated() / 1024**3
-                    )
-                loss_dac_1 = loss_dac_1_total / audio_input.size(1)
-                loss_dac_2 = loss_dac_2_total / audio_input.size(1)
-                loss_gen_mp = loss_gen_mp_total / audio_input.size(1)
-                loss_fm_mp = loss_fm_mp_total / audio_input.size(1)
-                loss_gen_mrd = loss_gen_mrd_total / audio_input.size(1)
-                loss_fm_mrd = loss_fm_mrd_total / audio_input.size(1)
-
-            else:
-                # pretraining phase
-                loss_gen_mp = 0
-                loss_gen_mrd = 0
-                loss_fm_mp = 0
-                loss_fm_mrd = 0
-                loss_dac_1 = 0
-                loss_dac_2 = 0
-
-
-            # Mel loss
-            mel_loss = mel_loss_fn(audio_hat, audio_input)
-
-            # total generator loss
-            spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
-            mask_ratio = torch.zeros((), device=device, dtype=torch.float32)
-
-            if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
-                ref_audio = audio_input.transpose(1, 2)
-                gen_audio = audio_hat.transpose(1, 2)
-
-                spatial_loss, mask_ratio = spatial_consistency_fn.compute_spatial_consistency(
-                    ref_audio,
-                    gen_audio,
+                loss_gen = (
+                    loss_gen_mp
+                    + mrd_loss_coeff * loss_gen_mrd
+                    + loss_fm_mp
+                    + mrd_loss_coeff * loss_fm_mrd
+                    + mel_loss_coeff * mel_loss
+                    + 1000 * commit_loss
+                    + loss_dac_1
+                    + loss_dac_2
+                    + spatial_loss_coeff * spatial_loss
                 )
 
-            loss_gen = (
-                loss_gen_mp
-                + mrd_loss_coeff * loss_gen_mrd
-                + loss_fm_mp
-                + mrd_loss_coeff * loss_fm_mrd
-                + mel_loss_coeff * mel_loss
-                + 1000 * commit_loss
-                + loss_dac_1
-                + loss_dac_2
-                + spatial_loss_coeff * spatial_loss
-            )
-
-            loss_gen.backward()
-            opt_gen.step()
+            scaler.scale(loss_gen).backward()
+            scaler.step(opt_gen)
+            scaler.update()
 
             # ==================================================
             # LOGGING & CHECKPOINTS
