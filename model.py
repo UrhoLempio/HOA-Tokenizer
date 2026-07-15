@@ -54,9 +54,9 @@ class HOA_WavTokenizer(nn.Module):
         audio = self.head(decoded)
         if audio.dim() == 2:
             audio = audio.unsqueeze(1)
-        print(f"z.shape: {z.shape}")
-        print(f"vq_result.quantized.shape: {vq_result.quantized.shape}")
-        print(f"decoded.shape: {decoded.shape}")
+        #print(f"z.shape: {z.shape}")
+        #print(f"vq_result.quantized.shape: {vq_result.quantized.shape}")
+        #print(f"decoded.shape: {decoded.shape}")
         return {
             "audio": audio,
             "commit_loss": vq_result.loss,

@@ -259,8 +259,8 @@ def main(config):
                 with torch.no_grad():
                     out = model(audio_input)
                     audio_hat = out["audio"]
-                    print(f"audio_input.shape = {audio_input.shape}")
-                    print(f"audio_hat.shape   = {audio_hat.shape}")
+                    #print(f"audio_input.shape = {audio_input.shape}")
+                    #print(f"audio_hat.shape   = {audio_hat.shape}")
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
@@ -306,8 +306,8 @@ def main(config):
             out = model(audio_input, bandwidth=6.6)
             audio_hat = out["audio"]
             commit_loss = out["commit_loss"]
-            print("audio_input.shape =", audio_input.shape)
-            print("audio_hat.shape   =", audio_hat.shape)
+            #print("audio_input.shape =", audio_input.shape)
+            #print("audio_hat.shape   =", audio_hat.shape)
 
             if train_discriminator:
                 loss_dac_1_total = 0.0
