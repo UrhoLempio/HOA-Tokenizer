@@ -335,11 +335,11 @@ def main(config):
             #print("audio_input.shape =", audio_input.shape)
             #print("audio_hat.shape   =", audio_hat.shape)
                 if global_step % 10 == 0:
-                    print(
-                        f"CommitRaw: {commit_loss.item():.3e} | "
-                        f"AudioHatMax: {audio_hat.abs().max().item():.3e}",
-                        flush=True,
-                    )
+                    #print(
+                    #    f"CommitRaw: {commit_loss.item():.3e} | "
+                    #    f"AudioHatMax: {audio_hat.abs().max().item():.3e}",
+                    #    flush=True,
+                    #)
                     if not torch.isfinite(commit_loss):
                         print(f"BAD COMMIT LOSS at step {global_step}")
                         break
