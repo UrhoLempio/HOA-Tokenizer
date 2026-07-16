@@ -335,6 +335,19 @@ def main(config):
             #print("audio_input.shape =", audio_input.shape)
             #print("audio_hat.shape   =", audio_hat.shape)
 
+            if global_step % 10 == 0:
+                print(
+                    f"CommitRaw: {commit_loss.item():.3e} | "
+                    f"AudioHatMax: {audio_hat.abs().max().item():.3e}",
+                    flush=True,
+                )
+                if not torch.isfinite(commit_loss):
+                    print(f"BAD COMMIT LOSS at step {global_step}")
+                    break
+                if not torch.isfinite(audio_hat).all():
+                    print(f"BAD AUDIO_HAT at step {global_step}")
+                    break
+
                 if train_discriminator:
                     loss_dac_1_total = 0.0
                     loss_dac_2_total = 0.0
@@ -396,7 +409,7 @@ def main(config):
                 # Mel loss
                 mel_loss = mel_loss_fn(audio_hat, audio_input)
 
-                # total generator loss
+                # Total generator loss
                 spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
                 mask_ratio = torch.zeros((), device=device, dtype=torch.float32)
 
