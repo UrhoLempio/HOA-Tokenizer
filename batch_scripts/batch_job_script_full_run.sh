@@ -1,12 +1,12 @@
 #!/bin/bash
-#SBATCH --job-name=foa_test_run
+#SBATCH --job-name=foa_test_run_50k_steps
 #SBATCH --account=project_2013256
 #SBATCH --partition=gpu
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --cpus-per-task=10
 #SBATCH --mem=32G
-#SBATCH --time=0-01:00:00
+#SBATCH --time=3-00:00:00
 #SBATCH --gres=gpu:v100:1,nvme:10
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.err
