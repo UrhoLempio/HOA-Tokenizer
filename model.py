@@ -48,7 +48,8 @@ class HOA_WavTokenizer(nn.Module):
     def forward(self, x, bandwidth=6.6):
         z = self.encoder(x)
 
-        vq_result = self.vq(z, frame_rate=75, bandwidth=bandwidth)
+        with torch.autocast(device_type=x.device.type, enabled=False):
+            vq_result = self.vq(z, frame_rate=75, bandwidth=bandwidth)
 
         decoded = self.decoder(vq_result.quantized)
         audio = self.head(decoded)
