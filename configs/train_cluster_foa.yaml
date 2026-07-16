@@ -12,7 +12,7 @@ io:
 model:
   in_channels: 4
 training:
-  max_steps: 4998
+  max_steps: 50000
   pretrain_mel_steps: 1000
   train_batch_size: 2
   val_batch_size: 4
@@ -28,5 +28,5 @@ training:
   val_every: 5000
   save_every: 5000
   sample_every: 5000
-  max_checkpoints: 10
+  max_checkpoints: 5
   device: cuda
