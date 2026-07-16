@@ -341,11 +341,10 @@ def main(config):
                     #    flush=True,
                     #)
                     if not torch.isfinite(commit_loss):
-                        print(f"BAD COMMIT LOSS at step {global_step}")
-                        break
+                        raise RuntimeError(f"BAD COMMIT LOSS at step {global_step}")
+                        
                     if not torch.isfinite(audio_hat).all():
-                        print(f"BAD AUDIO_HAT at step {global_step}")
-                        break
+                        raise RuntimeError(f"BAD AUDIO_HAT at step {global_step}")
 
                 if train_discriminator:
                     loss_dac_1_total = 0.0
@@ -408,29 +407,50 @@ def main(config):
                 # Mel loss
                 mel_loss = mel_loss_fn(audio_hat, audio_input)
 
-                # Total generator loss
-                spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
-                mask_ratio = torch.zeros((), device=device, dtype=torch.float32)
+            # Total generator loss
+            spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
+            mask_ratio = torch.zeros((), device=device, dtype=torch.float32)
 
-                if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
-                    ref_audio = audio_input.transpose(1, 2)
-                    gen_audio = audio_hat.transpose(1, 2)
+            if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
+                ref_audio = audio_input.transpose(1, 2)
+                gen_audio = audio_hat.transpose(1, 2)
 
-                    spatial_loss, mask_ratio = spatial_consistency_fn.compute_spatial_consistency(
-                        ref_audio,
-                        gen_audio,
-                    )
+                spatial_loss, mask_ratio = spatial_consistency_fn.compute_spatial_consistency(
+                    ref_audio,
+                    gen_audio,
+                )
 
-                loss_gen = (
-                    loss_gen_mp
-                    + mrd_loss_coeff * loss_gen_mrd
-                    + loss_fm_mp
-                    + mrd_loss_coeff * loss_fm_mrd
-                    + mel_loss_coeff * mel_loss
-                    + 1000 * commit_loss
-                    + loss_dac_1
-                    + loss_dac_2
-                    + spatial_loss_coeff * spatial_loss
+            loss_gen = (
+                loss_gen_mp
+                + mrd_loss_coeff * loss_gen_mrd
+                + loss_fm_mp
+                + mrd_loss_coeff * loss_fm_mrd
+                + mel_loss_coeff * mel_loss
+                + 1000 * commit_loss
+                + loss_dac_1
+                + loss_dac_2
+                + spatial_loss_coeff * spatial_loss
+            )
+
+            # DEBUG CHECKS
+            if not torch.isfinite(mel_loss):
+                raise RuntimeError(
+                    f"mel_loss became non-finite at step {global_step}"
+                )
+
+            if not torch.isfinite(spatial_loss):
+                raise RuntimeError(
+                    f"spatial_loss became non-finite at step {global_step}"
+                )
+
+            if not torch.isfinite(commit_loss):
+                raise RuntimeError(
+                    f"commit_loss became non-finite at step {global_step}"
+                )
+
+            if not torch.isfinite(loss_gen):
+                raise RuntimeError(
+                    f"loss_gen became non-finite at step {global_step}"
                 )
 
             scaler.scale(loss_gen).backward()
