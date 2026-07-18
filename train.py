@@ -2,6 +2,7 @@ import argparse
 import json
 import os
 from pathlib import Path
+import psutil
 
 from matplotlib.pylab import rint
 import torch
@@ -246,6 +247,8 @@ def main(config):
     # sanity check for batch shape
     print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
 
+    # Memory monitoring
+    process = psutil.Process(os.getpid())
 
     while global_step < max_steps:  
         for batch in train_loader:
@@ -547,6 +550,13 @@ def main(config):
                     audio_hat[0].detach().cpu(),
                     24000,
                 )
+
+            if global_step != 0 and global_step % 100 == 0:
+                print(
+                    f"[{global_step}] "
+                    f"RAM: {process.memory_info().rss / 1024**3:.2f} GB",
+                    flush=True
+                    )
 
             global_step += 1
 
