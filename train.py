@@ -478,8 +478,8 @@ def main(config):
                 writer.add_scalar("loss/train_disc", loss_disc.item(), global_step)
                 writer.add_scalar("loss/mel", mel_loss.item(), global_step)
                 writer.add_scalar("loss/commit", commit_loss.item(), global_step)
-                writer.add_scalar("loss/gen_mp", loss_gen_mp.item(), global_step)
-                writer.add_scalar("loss/gen_mrd", loss_gen_mrd.item(), global_step)
+                writer.add_scalar("loss/gen_mp", loss_gen_mp, global_step)
+                writer.add_scalar("loss/gen_mrd", loss_gen_mrd, global_step)
              
             if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
                 writer.add_scalar("loss/spatial", spatial_loss.item(), global_step)
