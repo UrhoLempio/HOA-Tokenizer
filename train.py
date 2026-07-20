@@ -408,8 +408,8 @@ def main(config):
                     loss_dac_2 = 0
 
 
-                # Mel loss
-                mel_loss = mel_loss_fn(audio_hat, audio_input)
+            # Mel loss
+            mel_loss = mel_loss_fn(audio_hat, audio_input)
 
             # Total generator loss
             spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
