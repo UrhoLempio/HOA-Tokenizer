@@ -615,11 +615,18 @@ def main(config):
                 )
 
             if global_step != 0 and global_step % 100 == 0:
+                total = 0
+                parent = psutil.Process()
+
+                for p in [parent] + parent.children(recursive=True):
+                    try:
+                        total += p.memory_info().rss
+                    except:
+                        pass
+
                 print(
-                    f"[{global_step}] "
-                    f"RAM: {process.memory_info().rss / 1024**3:.2f} GB",
-                    flush=True
-                    )
+                    f"TOTAL RAM: {total/1024**3:.2f} GB"
+                )
 
             global_step += 1
 
