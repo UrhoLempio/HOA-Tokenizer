@@ -89,7 +89,7 @@ def get_dataloaders(
     train_dataset = (
         wds.WebDataset(train_shard_paths, shardshuffle=200) #shardshuffle=1000 for more randomness
         .map(preprocess_target_channels)
-        .shuffle(2000)
+        .shuffle(200)
         .repeat()
     )
 

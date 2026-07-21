@@ -4,7 +4,6 @@ import os
 from pathlib import Path
 import psutil
 
-from matplotlib.pylab import rint
 import torch
 import torchaudio
 from model import HOA_WavTokenizer
@@ -27,10 +26,35 @@ except ImportError:
     _HAS_YAML = False
 
 
-def validate(model, discriminators, val_loader, mel_loss_fn, device):
+def validate(model: torch.nn.Module, 
+             val_loader: torch.utils.data.DataLoader, 
+             mel_loss_fn: torch.nn.Module, 
+             device: torch.device) -> tuple[float, torch.Tensor, str]:
+    """
+    Convenience function to validate the model on the validation set.
+    This function runs the model on the validation set and computes the average mel loss.
+    It also returns a reconstructed audio sample and its source filename.
+
+    Parameters:
+    -----------
+    model: torch.nn.Module
+            the generator model to validate
+    val_loader: torch.utils.data.DataLoader
+            the validation dataloader
+    mel_loss_fn: torch.nn.Module
+            the mel loss function to use for validation
+    device: torch.device
+            the device to run the validation on
+    Returns:
+    -----------
+    val_loss: float
+            the average validation loss over the validation set
+    sample_audio: torch.Tensor
+            a sample audio from the validation set
+    sample_source: str
+            the source of the sample audio
+    """
     model.eval()
-    for d in discriminators:
-        d.eval()
 
     val_losses = []
     sample_audio = None
@@ -51,8 +75,6 @@ def validate(model, discriminators, val_loader, mel_loss_fn, device):
                 sample_source = batch["source"][0]
 
     model.train()
-    for d in discriminators:
-        d.train()
 
     if not val_losses:
         raise RuntimeError("Validation loader is empty.")
@@ -61,6 +83,19 @@ def validate(model, discriminators, val_loader, mel_loss_fn, device):
 
 
 def load_config(config_path: Path):
+    """
+    Load the configuration from a json or yaml file.
+
+    Parameters:
+    -----------
+    config_path: Path
+            The path to the configuration file
+
+    Returns:
+    --------
+    dict
+            The loaded configuration
+    """
     if not config_path.exists():
         raise FileNotFoundError(f"Config file not found: {config_path}")
 
@@ -75,6 +110,7 @@ def load_config(config_path: Path):
 
 
 def config_int(config, section, key, default):
+    """Helper function to guarantee that the config value is an integer."""
     value = config.get(section, {}).get(key, default)
     try:
         return int(value)
@@ -83,6 +119,7 @@ def config_int(config, section, key, default):
 
 
 def config_float(config, section, key, default):
+    """Helper function to guarantee that the config value is a float."""
     value = config.get(section, {}).get(key, default)
     try:
         return float(value)
@@ -91,6 +128,7 @@ def config_float(config, section, key, default):
 
 
 def config_bool(config, section, key, default):
+    """Helper function to guarantee that the config value is a boolean."""
     value = config.get(section, {}).get(key, default)
     if isinstance(value, bool):
         return value
@@ -114,43 +152,60 @@ def parse_args():
 
 
 def main(config):
+
+    global USE_TQDM
+    use_tqdm = config.get("env", {}).get("use_tqdm", True)
+    USE_TQDM = use_tqdm
+    if USE_TQDM:
+        from tqdm import tqdm
+
     train_dir = config["data"]["train_dir"]
     val_dir = config["data"]["val_dir"]
-
+    checkpoint_dir = Path(config["io"].get("checkpoint_dir", "./checkpoints"))
+    samples_dir = Path(config["io"].get("generator_samples_dir", "./generator_samples"))
+    val_samples_dir = Path(config["io"].get("val_samples_dir", "./val_samples"))
+    logs_dir = Path(config["io"].get("log_dir", "./logs"))
     in_channels = config_int(config, "model", "in_channels", 4)
     train_batch_size = config_int(config, "training", "train_batch_size", 2)
     val_batch_size = config_int(config, "training", "val_batch_size", 2)
     train_num_workers = config_int(config, "training", "train_num_workers", 0)
     val_num_workers = config_int(config, "training", "val_num_workers", 0)
     pin_memory = config_bool(config, "training", "pin_memory", True)
+    max_steps = config_int(config, "training", "max_steps", 50000)
+    pretrain_mel_steps = config_int(config, "training", "pretrain_mel_steps", 0)
+    mel_loss_coeff = config_float(config, "training", "mel_loss_coeff", 45.0)
+    mrd_loss_coeff = config_float(config, "training", "mrd_loss_coeff", 1.0)
+    spatial_loss_coeff = config_float(config, "training", "spatial_loss_coeff", 0.01)
+    commit_loss_coeff = config_float(config, "training", "commit_loss_coeff", 1000.0)
+    grad_clip_norm = config_float(config, "training", "grad_clip_norm", 1.0)
+    spatial_loss_every = config_int(config, "training", "spatial_loss_every", 5)
+    val_every = config_int(config, "training", "val_every", 2000)
+    save_every = config_int(config, "training", "save_every", 5000)
+    sample_every = config_int(config, "training", "sample_every", save_every)
+    max_checkpoints = config_int(config, "training", "max_checkpoints", 5)
+    learning_rate = config_float(config, "training", "lr", 2e-4)
 
-    checkpoint_dir = Path(config["io"].get("checkpoint_dir", "./checkpoints"))
-    samples_dir = Path(config["io"].get("generator_samples_dir", "./generator_samples"))
-    val_samples_dir = Path(config["io"].get("val_samples_dir", "./val_samples"))
-    logs_dir = Path(config["io"].get("log_dir", "./logs"))
-    for path in (checkpoint_dir, samples_dir, val_samples_dir, logs_dir):
-        path.mkdir(parents=True, exist_ok=True)
-
-    writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
-
+    # Determine device
     if config["training"].get("device", "auto") == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
     else:
         device = config["training"]["device"]
 
-    # Set audio loader and progress bar based on config
-    global USE_TQDM
-    # set audio loader to torchaudio or soundfile based on config
+    # Set audio loader to torchaudio or soundfile based on config
     audio_loader = config.get("env", {}).get("audio_loader", "torchaudio")
-    use_tqdm = config.get("env", {}).get("use_tqdm", True)
-    
     set_audio_loader(audio_loader)
-    set_target_channels(in_channels)
-    USE_TQDM = use_tqdm
-    
-    if USE_TQDM:
-        from tqdm import tqdm
 
+    # Set target channels for audio loading
+    set_target_channels(in_channels)
+
+    # Create necessary directories
+    for path in (checkpoint_dir, samples_dir, val_samples_dir, logs_dir):
+        path.mkdir(parents=True, exist_ok=True)
+
+    # Initialize TensorBoard writer
+    writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
+
+    # Get dataloaders
     train_loader, val_loader = get_dataloaders(
         train_dir,
         val_dir,
@@ -164,11 +219,12 @@ def main(config):
 
     # Model
     model = HOA_WavTokenizer(in_channels=in_channels).to(device)
-    # optional print of model parameters
+
+    # Optional print of model parameters (71.69M parameters)
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters())
     total_params = count_parameters(model)
-    print(f"Model parameters: {total_params / 1e6:.2f}M") # 71.69M Model Parameters
+    print(f"Model parameters: {total_params / 1e6:.2f}M") 
 
     # Discriminators
     disc_mpd = MultiPeriodDiscriminator().to(device)
@@ -185,7 +241,6 @@ def main(config):
     dac_loss = DACGANLoss(disc_dac).to(device)
 
     # Optimizers
-    learning_rate = config_float(config, "training", "lr", 2e-4)
     opt_gen = torch.optim.AdamW(model.parameters(), lr=learning_rate)
     disc_params = []
     for d in discriminators:    
@@ -223,23 +278,10 @@ def main(config):
 
     else:
         global_step = 0
-
-
-
-    max_steps = config_int(config, "training", "max_steps", 50000)
-    pretrain_mel_steps = config_int(config, "training", "pretrain_mel_steps", 0)
-    mel_loss_coeff = config_float(config, "training", "mel_loss_coeff", 45.0)
-    mrd_loss_coeff = config_float(config, "training", "mrd_loss_coeff", 1.0)
-    spatial_loss_coeff = config_float(config, "training", "spatial_loss_coeff", 0.01)
-    commit_loss_coeff = config_float(config, "training", "commit_loss_coeff", 1000.0)
-    grad_clip_norm = config_float(config, "training", "grad_clip_norm", 1.0)
-    spatial_loss_every = config_int(config, "training", "spatial_loss_every", 5)
-    val_every = config_int(config, "training", "val_every", 2000)
-    save_every = config_int(config, "training", "save_every", 5000)
-    sample_every = config_int(config, "training", "sample_every", save_every)
-    max_checkpoints = config_int(config, "training", "max_checkpoints", 5)
-
+    
+    #############################
     print("Starting training...")
+    #############################
 
     if USE_TQDM:
         pbar = tqdm(total=max_steps)
@@ -247,7 +289,8 @@ def main(config):
         pbar = None
 
     batch = next(iter(train_loader))
-    # sanity check for batch shape
+
+    # Sanity check for batch shape
     print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
 
     # Memory monitoring
@@ -515,7 +558,7 @@ def main(config):
                 writer.flush()
 
             if global_step != 0 and global_step % val_every == 0:
-                val_loss, val_sample, val_reference_fname = validate(model, discriminators, val_loader, mel_loss_fn, device)
+                val_loss, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, device)
                 writer.add_scalar("loss/val_mel", val_loss, global_step)
                 writer.flush()
                 print(f"[{global_step}] Val mel: {val_loss:.4f}", flush=True)
