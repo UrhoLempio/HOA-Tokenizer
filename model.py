@@ -51,8 +51,8 @@ class HOA_WavTokenizer(nn.Module):
         with torch.autocast(device_type=x.device.type, enabled=False):
             vq_result = self.vq(z.float(), frame_rate=75, bandwidth=bandwidth)
 
-        decoded = self.decoder(vq_result.quantized)
-        audio = self.head(decoded)
+            decoded = self.decoder(vq_result.quantized)
+            audio = self.head(decoded)
         if audio.dim() == 2:
             audio = audio.unsqueeze(1)
         #print(f"z.shape: {z.shape}")

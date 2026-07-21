@@ -193,7 +193,8 @@ def main(config):
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
     # AMP
-    scaler = GradScaler(device)
+    use_amp = device == "cuda"
+    scaler = GradScaler(device) if use_amp else None
 
     # Checkpoint loading
     resume_path = None
@@ -230,6 +231,8 @@ def main(config):
     mel_loss_coeff = config_float(config, "training", "mel_loss_coeff", 45.0)
     mrd_loss_coeff = config_float(config, "training", "mrd_loss_coeff", 1.0)
     spatial_loss_coeff = config_float(config, "training", "spatial_loss_coeff", 0.01)
+    commit_loss_coeff = config_float(config, "training", "commit_loss_coeff", 1000.0)
+    grad_clip_norm = config_float(config, "training", "grad_clip_norm", 1.0)
     spatial_loss_every = config_int(config, "training", "spatial_loss_every", 5)
     val_every = config_int(config, "training", "val_every", 2000)
     save_every = config_int(config, "training", "save_every", 5000)
@@ -273,7 +276,7 @@ def main(config):
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
-                with autocast(device_type=device):
+                with autocast(device_type=device, enabled=use_amp):
                     for ch in range(audio_input.size(1)):
                         audio_input_ch = audio_input[:, ch:ch + 1, :]
                         audio_hat_ch = audio_hat[:, ch:ch + 1, :]
@@ -324,15 +327,22 @@ def main(config):
                     # total discriminator loss
                     loss_disc = loss_mp + mrd_loss_coeff * loss_mrd + loss_dac
 
-                scaler.scale(loss_disc).backward()
-                scaler.step(opt_disc)
-                scaler.update()
+                if scaler is not None:
+                    scaler.scale(loss_disc).backward()
+                    scaler.unscale_(opt_disc)
+                    torch.nn.utils.clip_grad_norm_(disc_params, grad_clip_norm)
+                    scaler.step(opt_disc)
+                    scaler.update()
+                else:
+                    loss_disc.backward()
+                    torch.nn.utils.clip_grad_norm_(disc_params, grad_clip_norm)
+                    opt_disc.step()
 
             # ==================================================
             # GENERATOR STEP
             # ==================================================
             opt_gen.zero_grad()
-            with autocast(device_type=device):
+            with autocast(device_type=device, enabled=use_amp):
                 out = model(audio_input, bandwidth=6.6)
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
@@ -407,9 +417,12 @@ def main(config):
                     loss_dac_1 = 0
                     loss_dac_2 = 0
 
-
+            if not torch.isfinite(audio_hat).all():
+                raise RuntimeError(
+                    f"audio_hat became non-finite at step {global_step}"
+                )
             # Mel loss
-            mel_loss = mel_loss_fn(audio_hat, audio_input)
+            mel_loss = mel_loss_fn(audio_hat.float(), audio_input.float())
 
             # Total generator loss
             spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
@@ -430,7 +443,7 @@ def main(config):
                 + loss_fm_mp
                 + mrd_loss_coeff * loss_fm_mrd
                 + mel_loss_coeff * mel_loss
-                + 1000 * commit_loss
+                + commit_loss_coeff * commit_loss
                 + loss_dac_1
                 + loss_dac_2
                 + spatial_loss_coeff * spatial_loss
@@ -457,9 +470,16 @@ def main(config):
                     f"loss_gen became non-finite at step {global_step}"
                 )
 
-            scaler.scale(loss_gen).backward()
-            scaler.step(opt_gen)
-            scaler.update()
+            if scaler is not None:
+                scaler.scale(loss_gen).backward()
+                scaler.unscale_(opt_gen)
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                scaler.step(opt_gen)
+                scaler.update()
+            else:
+                loss_gen.backward()
+                torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
+                opt_gen.step()
 
             # ==================================================
             # LOGGING & CHECKPOINTS
