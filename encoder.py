@@ -141,7 +141,7 @@ class SEANetEncoder(nn.Module):
     
 if __name__ == "__main__":
     # Test the encoder with a random input
-    encoder = SEANetEncoder(channels=1)
-    x = torch.randn(1, 1, 72000)  # Batch size 1, 1 channel, 72000 samples (3 second at 24kHz)
+    encoder = SEANetEncoder(channels=4)
+    x = torch.randn(1, 4, 72000)  # Batch size 1, 4 channels, 72000 samples (3 second at 24kHz)
     z = encoder(x)
-    print(z.shape)
+    print(z.shape) # Expected output: torch.Size([1, 128, 225])

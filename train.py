@@ -580,8 +580,22 @@ def main(config):
                         "step": global_step,
                         "best_val_loss": best_val_loss,
                     }
-                    torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best_{global_step}.pt"))
-                    print(f"✅ New best validation checkpoint: {best_val_loss:.4f}", flush=True)
+                    torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best.pt"))
+                    with open(
+                        checkpoint_dir / "checkpoint_best_info.txt",
+                        "w"
+                    ) as f:
+                        f.write(
+                            f"step={global_step}\n"
+                            f"val_loss={best_val_loss}\n"
+                        )
+                            
+                    print(
+                        f"✅ New best validation checkpoint "
+                        f"(step {global_step}, "
+                        f"val={best_val_loss:.4f})",
+                        flush=True,
+                        )
 
             if global_step != 0 and global_step % save_every == 0:
                 checkpoint = {
