@@ -161,3 +161,26 @@ class DACGANLoss(nn.Module):
                 loss_feature += F.l1_loss(d_fake[i][j], d_real[i][j].detach())
         return loss_g, loss_feature
 
+if __name__ == "__main__":
+    # Test the loss functions with random inputs
+    batch_size = 4
+    channels = 4
+    length = 16000
+
+    fake_audio = torch.randn(batch_size, channels, length)
+    real_audio = torch.randn(batch_size, channels, length)
+
+    mel_loss_fn = MelSpecReconstructionLoss()
+    gen_loss_fn = GeneratorLoss()
+    disc_loss_fn = DiscriminatorLoss()
+    fm_loss_fn = FeatureMatchingLoss()
+
+    mel_loss = mel_loss_fn(fake_audio, real_audio)
+    print(f"MelSpecReconstructionLoss: {mel_loss.item()}")
+
+    # Assuming discriminator outputs are lists of tensors
+    disc_real_outputs = [torch.randn(batch_size, 1) for _ in range(3)]
+    disc_generated_outputs = [torch.randn(batch_size, 1) for _ in range(3)]
+
+    disc_loss, r_losses, g_losses = disc_loss_fn(disc_real_outputs, disc_generated_outputs)
+    print(f"DiscriminatorLoss: {disc_loss.item()}, Real losses: {r_losses}, Generated losses: {g_losses}")

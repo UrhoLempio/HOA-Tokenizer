@@ -5,17 +5,19 @@ import torch.nn.functional as F
 from torch.nn import Conv2d
 from einops import rearrange
 from torch.nn.utils.parametrizations import weight_norm
+from SpatialConsistency import SpatialConsistency
 from utils import STFTParams, WNConv1d, WNConv2d
+from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, FeatureMatchingLoss, DACGANLoss
 
 # DAC DISCRIMINATOR
 
 class MPD(nn.Module):
-    def __init__(self, period):
+    def __init__(self, period, in_channels: int = 1):
         super().__init__()
         self.period = period
         self.convs = nn.ModuleList(
             [
-                WNConv2d(1, 32, (5, 1), (3, 1), padding=(2, 0)),
+                WNConv2d(in_channels, 32, (5, 1), (3, 1), padding=(2, 0)),
                 WNConv2d(32, 128, (5, 1), (3, 1), padding=(2, 0)),
                 WNConv2d(128, 512, (5, 1), (3, 1), padding=(2, 0)),
                 WNConv2d(512, 1024, (5, 1), (3, 1), padding=(2, 0)),
@@ -48,11 +50,11 @@ class MPD(nn.Module):
 
 
 class MSD(nn.Module):
-    def __init__(self, rate: int = 1, sample_rate: int = 24000):
+    def __init__(self, rate: int = 1, sample_rate: int = 24000, in_channels: int = 1):
         super().__init__()
         self.convs = nn.ModuleList(
             [
-                WNConv1d(1, 16, 15, 1, padding=7),
+                WNConv1d(in_channels, 16, 15, 1, padding=7),
                 WNConv1d(16, 64, 41, 4, groups=4, padding=20),
                 WNConv1d(64, 256, 41, 4, groups=16, padding=20),
                 WNConv1d(256, 1024, 41, 4, groups=64, padding=20),
@@ -90,6 +92,7 @@ class MRD(nn.Module):
         hop_factor: float = 0.25,
         sample_rate: int = 24000,
         bands: list = BANDS,
+        in_channels: int = 1,
     ):
         """Complex multi-band spectrogram discriminator.
         Parameters
@@ -122,7 +125,7 @@ class MRD(nn.Module):
         ch = 32
         convs = lambda: nn.ModuleList(
             [
-                WNConv2d(2, ch, (3, 9), (1, 1), padding=(1, 4)),
+                WNConv2d(2 * in_channels, ch, (3, 9), (1, 1), padding=(1, 4)),
                 WNConv2d(ch, ch, (3, 9), (1, 2), padding=(1, 4)),
                 WNConv2d(ch, ch, (3, 9), (1, 2), padding=(1, 4)),
                 WNConv2d(ch, ch, (3, 9), (1, 2), padding=(1, 4)),
@@ -138,15 +141,30 @@ class MRD(nn.Module):
 
         # x.squeeze(0).stft(n_fft=1024,win_length=1024,return_complex=True).size()
         # breakpoint()
-        if x.size(0)==1:
-            # x = torch.view_as_real(x.squeeze(0).stft(n_fft=self.window_length,return_complex=True).unsqueeze(0))
-            x = torch.view_as_real(x.squeeze(0).stft(n_fft=self.n_fft,return_complex=True).unsqueeze(0))
-        else:
-            # x = torch.view_as_real(x.squeeze(1).stft(n_fft=self.window_length,return_complex=True).unsqueeze(1))
-            x = torch.view_as_real(x.squeeze(1).stft(n_fft=self.n_fft,return_complex=True).unsqueeze(1))
-        x = rearrange(x, "b 1 f t c -> (b 1) c t f")
+
+        #if x.size(0)==1:
+        #    # x = torch.view_as_real(x.squeeze(0).stft(n_fft=self.window_length,return_complex=True).unsqueeze(0))
+        #    x = torch.view_as_real(x.squeeze(0).stft(n_fft=self.n_fft,return_complex=True).unsqueeze(0))
+        #else:
+        #    # x = torch.view_as_real(x.squeeze(1).stft(n_fft=self.window_length,return_complex=True).unsqueeze(1))
+        #    x = torch.view_as_real(x.squeeze(1).stft(n_fft=self.n_fft,return_complex=True).unsqueeze(1))
+        #x = rearrange(x, "b 1 f t c -> (b 1) c t f")
         # Split into bands
-        x_bands = [x[..., b[0] : b[1]] for b in self.bands]
+        #x_bands = [x[..., b[0] : b[1]] for b in self.bands]
+
+        B, C, T = x.shape
+        x = x.reshape(B * C, T)
+        x = torch.stft(x, n_fft=self.n_fft, return_complex=True, window=torch.ones(self.n_fft, device=x.device)) # use rectangular window as in MultiPeriodDiscriminator
+
+        # [B*C, F, TT] -> [B*C, F, TT, 2]
+        x = torch.view_as_real(x)
+
+        # [B*C, F, TT, 2]
+        # ->
+        # [B, C*2, TT, F]
+        x = rearrange(x,"(b c) f t ri -> b (c ri) t f",b=B,c=C,)
+        x_bands = [x[..., b[0]:b[1]] for b in self.bands]
+        
         return x_bands
 
     def forward(self, x):
@@ -176,6 +194,7 @@ class DACDiscriminator(nn.Module):
         fft_sizes: list = [2048, 1024, 512],
         sample_rate: int = 24000,
         bands: list = BANDS,
+        in_channels: int = 1,
     ):
         """Discriminator that combines multiple discriminators.
 
@@ -195,9 +214,9 @@ class DACDiscriminator(nn.Module):
         """
         super().__init__()
         discs = []
-        discs += [MPD(p) for p in periods]
-        discs += [MSD(r, sample_rate=sample_rate) for r in rates]
-        discs += [MRD(f, sample_rate=sample_rate, bands=bands) for f in fft_sizes]
+        discs += [MPD(p, in_channels=in_channels) for p in periods]
+        discs += [MSD(r, in_channels=in_channels, sample_rate=sample_rate) for r in rates]
+        discs += [MRD(f, in_channels=in_channels, sample_rate=sample_rate, bands=bands) for f in fft_sizes]
         self.discriminators = nn.ModuleList(discs)
 
     def preprocess(self, y):
@@ -215,7 +234,7 @@ class DACDiscriminator(nn.Module):
 
 # DISCRIMINATORS
 
-
+# accepts n-channel audio
 class MultiPeriodDiscriminator(nn.Module):
     """
     Multi-Period Discriminator module adapted from https://github.com/jik876/hifi-gan.
@@ -227,9 +246,9 @@ class MultiPeriodDiscriminator(nn.Module):
             Defaults to None.
     """
 
-    def __init__(self, periods: Tuple[int] = (2, 3, 5, 7, 11), num_embeddings: int = None):
+    def __init__(self, periods: Tuple[int] = (2, 3, 5, 7, 11), num_embeddings: int = None, in_channels: int=1):
         super().__init__()
-        self.discriminators = nn.ModuleList([DiscriminatorP(period=p, num_embeddings=num_embeddings) for p in periods])
+        self.discriminators = nn.ModuleList([DiscriminatorP(period=p, num_embeddings=num_embeddings, in_channels=in_channels) for p in periods])
 
     def forward(
         self, y: torch.Tensor, y_hat: torch.Tensor, bandwidth_id: torch.Tensor = None
@@ -280,7 +299,7 @@ class DiscriminatorP(nn.Module):
     def forward(
         self, x: torch.Tensor, cond_embedding_id: torch.Tensor = None
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
-        x = x.unsqueeze(1)
+        #x = x.unsqueeze(1)
         fmap = []
         # 1d to 2d
         b, c, t = x.shape
@@ -307,12 +326,13 @@ class DiscriminatorP(nn.Module):
 
         return x, fmap
 
-
+# accepts n-channel audio
 class MultiResolutionDiscriminator(nn.Module):
     def __init__(
         self,
         resolutions: Tuple[Tuple[int, int, int]] = ((1024, 256, 1024), (2048, 512, 2048), (512, 128, 512)),
         num_embeddings: int = None,
+        in_channels: int = 1,
     ):
         """
         Multi-Resolution Discriminator module adapted from https://github.com/mindslab-ai/univnet.
@@ -326,7 +346,7 @@ class MultiResolutionDiscriminator(nn.Module):
         """
         super().__init__()
         self.discriminators = nn.ModuleList(
-            [DiscriminatorR(resolution=r, num_embeddings=num_embeddings) for r in resolutions]
+            [DiscriminatorR(resolution=r, num_embeddings=num_embeddings, in_channels=in_channels) for r in resolutions]
         )
 
     def forward(
@@ -380,7 +400,7 @@ class DiscriminatorR(nn.Module):
     ) -> Tuple[torch.Tensor, List[torch.Tensor]]:
         fmap = []
         x = self.spectrogram(x)
-        x = x.unsqueeze(1)
+        #x = x.unsqueeze(1)
         for l in self.convs:
             x = l(x)
             x = torch.nn.functional.leaky_relu(x, self.lrelu_slope)
@@ -399,6 +419,8 @@ class DiscriminatorR(nn.Module):
 
     def spectrogram(self, x: torch.Tensor) -> torch.Tensor:
         n_fft, hop_length, win_length = self.resolution
+        B, C, T = x.shape
+        x = x.reshape(B * C, T)
         magnitude_spectrogram = torch.stft(
             x,
             n_fft=n_fft,
@@ -408,17 +430,48 @@ class DiscriminatorR(nn.Module):
             center=True,
             return_complex=True,
         ).abs()
+        F, TT = magnitude_spectrogram.shape[-2:]
+
+        magnitude_spectrogram = magnitude_spectrogram.reshape(B, C, F, TT)
 
         return magnitude_spectrogram
 
 
+
 if __name__ == "__main__":
-    disc = DACDiscriminator()
-    x = torch.zeros(1, 1, 24000)
-    results = disc(x)
-    breakpoint()
-    for i, result in enumerate(results):
-        print(f"disc{i}")
-        for i, r in enumerate(result):
-            print(r.shape, r.mean(), r.min(), r.max())
-        print("00")
+    #disc = DACDiscriminator()
+    #x = torch.zeros(1, 1, 24000)
+    #results = disc(x)
+    #breakpoint()
+    #for i, result in enumerate(results):
+    #    print(f"disc{i}")
+    #    for i, r in enumerate(result):
+    #        print(r.shape, r.mean(), r.min(), r.max())
+    #        print("00")
+    in_channels = 4
+    device = torch.device("cuda" if torch.cuda.is_available() else "mps")
+    audio_input = torch.randn(1, in_channels, 24000).to(device)
+    audio_hat = torch.randn(1, in_channels, 24000).to(device)
+
+    
+    disc_mpd = MultiPeriodDiscriminator(in_channels=in_channels).to(device)
+    disc_mrd = MultiResolutionDiscriminator(in_channels=in_channels).to(device)
+    disc_dac = DACDiscriminator(in_channels=in_channels).to(device)
+    dac_loss = DACGANLoss(disc_dac).to(device)
+    #mel_loss_fn = MelSpecReconstructionLoss(sample_rate=24000).to(device)
+    #gen_loss_fn = GeneratorLoss().to(device)
+    #spatial_consistency_fn = SpatialConsistency(sample_rate=24000)
+    #disc_loss_fn = DiscriminatorLoss().to(device)
+    #feat_match_loss_fn = FeatureMatchingLoss().to(device)
+    
+
+    real_mp, gen_mp, _, _ = disc_mpd(y=audio_input, y_hat=audio_hat)
+    print(f"real_mp: {len(real_mp)}")
+    print(f"gen_mp: {len(gen_mp)}")
+
+    real_mrd, gen_mrd, _, _ = disc_mrd(y=audio_input, y_hat=audio_hat)
+    print(f"real_mrd: {len(real_mrd)}")
+    print(f"gen_mrd: {len(gen_mrd)}")
+
+    loss_dac_total = dac_loss.discriminator_loss(audio_hat, audio_input)
+    print(f"loss_dac_total: {loss_dac_total}")

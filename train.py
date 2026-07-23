@@ -63,6 +63,7 @@ def validate(model: torch.nn.Module,
         # Change to "batch in val_loader" when full validation is needed.
         # For now we just want to check if the validation loop runs and produces reasonable output.
         # This is a speed hack to avoid running the full validation which can be time consuming.
+        # TODO stft distance, angular error and plot to tensorboard
         for i, batch in enumerate(val_loader):
             if i > 20:
                 break   
@@ -185,7 +186,6 @@ def main(config):
     max_checkpoints = config_int(config, "training", "max_checkpoints", 5)
     learning_rate = config_float(config, "training", "lr", 2e-4)
 
-    # Determine device
     if config["training"].get("device", "auto") == "auto":
         device = "cuda" if torch.cuda.is_available() else "cpu"
     else:
@@ -227,9 +227,9 @@ def main(config):
     print(f"Model parameters: {total_params / 1e6:.2f}M") 
 
     # Discriminators
-    disc_mpd = MultiPeriodDiscriminator().to(device)
-    disc_mrd = MultiResolutionDiscriminator().to(device)
-    disc_dac = DACDiscriminator().to(device)
+    disc_mpd = MultiPeriodDiscriminator(in_channels=in_channels).to(device)
+    disc_mrd = MultiResolutionDiscriminator(in_channels=in_channels).to(device)
+    disc_dac = DACDiscriminator(in_channels=in_channels).to(device)
     discriminators = [disc_mpd, disc_mrd, disc_dac]
 
     # Losses 
@@ -293,9 +293,6 @@ def main(config):
     # Sanity check for batch shape
     print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
 
-    # Memory monitoring
-    process = psutil.Process(os.getpid())
-
     while global_step < max_steps:  
         for batch in train_loader:
             #print(f"Entered training loop step {global_step}", flush=True)
@@ -314,60 +311,33 @@ def main(config):
                 with torch.no_grad():
                     out = model(audio_input)
                     audio_hat = out["audio"]
-                    #print(f"audio_input.shape = {audio_input.shape}")
-                    #print(f"audio_hat.shape   = {audio_hat.shape}")
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
                 with autocast(device_type=device, enabled=use_amp):
-                    for ch in range(audio_input.size(1)):
-                        audio_input_ch = audio_input[:, ch:ch + 1, :]
-                        audio_hat_ch = audio_hat[:, ch:ch + 1, :]
-                        audio_input_1d = audio_input_ch.squeeze(1)
-                        audio_hat_1d = audio_hat_ch.squeeze(1)
-                        #print(
-                        #    "allocated before DAC:",
-                        #    torch.cuda.memory_allocated() / 1024**3,
-                        #    "GB"
-                        #)
-                        loss_dac_total += dac_loss.discriminator_loss(audio_hat_ch, audio_input_ch)
-                        #print(
-                        #    "allocated after DAC and before MPD:",
-                        #    torch.cuda.memory_allocated() / 1024**3,
-                        #    "GB"
-                        #)
-                        
-                        real_mp, gen_mp, _, _ = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
-                        #print(
-                        #    "allocated after MPD and before MRD:",
-                        #    torch.cuda.memory_allocated() / 1024**3,
-                        #    "GB"
-                        #)
-                        loss_mp, loss_mp_real, _ = disc_loss_fn(
-                            disc_real_outputs=real_mp,
-                            disc_generated_outputs=gen_mp,
-                        )
-                        loss_mp = loss_mp / len(loss_mp_real)
-                        loss_mp_total += loss_mp
+                    # TODO change the discriminators for four channels instead
+                    loss_dac_total += dac_loss.discriminator_loss(audio_hat, audio_input)
+                    
+                    real_mp, gen_mp, _, _ = disc_mpd(y=audio_input, y_hat=audio_hat)
+                    loss_mp, loss_mp_real, _ = disc_loss_fn(
+                        disc_real_outputs=real_mp,
+                        disc_generated_outputs=gen_mp,
+                    )
+                    loss_mp = loss_mp / len(loss_mp_real)
+                    loss_mp_total += loss_mp
 
-                        real_mrd, gen_mrd, _, _ = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
-                        loss_mrd, loss_mrd_real, _ = disc_loss_fn(
-                            disc_real_outputs=real_mrd,
-                            disc_generated_outputs=gen_mrd,
-                        )
-                        #print(
-                        #    "allocated after MRD:",
-                        #    torch.cuda.memory_allocated() / 1024**3,
-                        #    "GB"
-                        #)
-                        loss_mrd = loss_mrd / len(loss_mrd_real)
-                        loss_mrd_total += loss_mrd
+                    real_mrd, gen_mrd, _, _ = disc_mrd(y=audio_input, y_hat=audio_hat)
+                    loss_mrd, loss_mrd_real, _ = disc_loss_fn(
+                        disc_real_outputs=real_mrd,
+                        disc_generated_outputs=gen_mrd,
+                    )
+                    loss_mrd = loss_mrd / len(loss_mrd_real)
+                    loss_mrd_total += loss_mrd
 
                     loss_dac = loss_dac_total / audio_input.size(1)
                     loss_mp = loss_mp_total / audio_input.size(1)
                     loss_mrd = loss_mrd_total / audio_input.size(1)
 
-                    # total discriminator loss
                     loss_disc = loss_mp + mrd_loss_coeff * loss_mrd + loss_dac
 
                 if scaler is not None:
@@ -389,14 +359,7 @@ def main(config):
                 out = model(audio_input, bandwidth=6.6)
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
-            #print("audio_input.shape =", audio_input.shape)
-            #print("audio_hat.shape   =", audio_hat.shape)
                 if global_step % 10 == 0:
-                    #print(
-                    #    f"CommitRaw: {commit_loss.item():.3e} | "
-                    #    f"AudioHatMax: {audio_hat.abs().max().item():.3e}",
-                    #    flush=True,
-                    #)
                     if not torch.isfinite(commit_loss):
                         raise RuntimeError(f"BAD COMMIT LOSS at step {global_step}")
                         
@@ -411,39 +374,25 @@ def main(config):
                     loss_gen_mrd_total = 0.0
                     loss_fm_mrd_total = 0.0
 
-                    for ch in range(audio_input.size(1)):
-                        #print(
-                        #    f"before ch {ch}:",
-                        #    torch.cuda.memory_allocated() / 1024**3
-                        #)
-                        audio_input_ch = audio_input[:, ch:ch + 1, :]
-                        audio_hat_ch = audio_hat[:, ch:ch + 1, :]
-                        audio_input_1d = audio_input_ch.squeeze(1)
-                        audio_hat_1d = audio_hat_ch.squeeze(1)
+                    loss_dac_1, loss_dac_2 = dac_loss.generator_loss(audio_hat, audio_input)
+                    loss_dac_1_total += loss_dac_1
+                    loss_dac_2_total += loss_dac_2
 
-                        loss_dac_1, loss_dac_2 = dac_loss.generator_loss(audio_hat_ch, audio_input_ch)
-                        loss_dac_1_total += loss_dac_1
-                        loss_dac_2_total += loss_dac_2
+                    _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input, y_hat=audio_hat)
+                    loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
+                    loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
+                    loss_gen_mp_total += loss_gen_mp
 
-                        _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input_1d, y_hat=audio_hat_1d)
-                        loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
-                        loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
-                        loss_gen_mp_total += loss_gen_mp
+                    loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
+                    loss_fm_mp_total += loss_fm_mp
 
-                        loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
-                        loss_fm_mp_total += loss_fm_mp
+                    _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(y=audio_input, y_hat=audio_hat)
+                    loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
+                    loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
+                    loss_gen_mrd_total += loss_gen_mrd
 
-                        _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(y=audio_input_1d, y_hat=audio_hat_1d)
-                        loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
-                        loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
-                        loss_gen_mrd_total += loss_gen_mrd
-
-                        loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
-                        loss_fm_mrd_total += loss_fm_mrd
-                        #print(
-                        #    f"after ch {ch}:",
-                        #    torch.cuda.memory_allocated() / 1024**3
-                        #)
+                    loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
+                    loss_fm_mrd_total += loss_fm_mrd
                     loss_dac_1 = loss_dac_1_total / audio_input.size(1)
                     loss_dac_2 = loss_dac_2_total / audio_input.size(1)
                     loss_gen_mp = loss_gen_mp_total / audio_input.size(1)
@@ -653,17 +602,6 @@ def main(config):
                     pbar.set_description(
                         f"G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}"
                     )
-            #else:
-            #    if global_step % 100 == 0:
-            #        print(
-            #            f"Step {global_step}/{max_steps} | "
-            #            f"G:{loss_gen.item():.2f} "
-            #            f"D:{loss_disc.item():.2f} "
-            #            f"Mel:{mel_loss.item():.4f} "
-            #            f"Spatial:{spatial_loss.item():.4f} "
-            #            f"Commit:{commit_loss.item():.6f}",
-            #            flush=True,
-            #        )
     writer.close()
     print("Training completed successfully!")
 

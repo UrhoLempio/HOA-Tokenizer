@@ -208,7 +208,7 @@ __marimo__/
 
 # macOS
 .DS_Store
-
+./test_data/.DS_Store
 # Generated files
 checkpoints/
 generator_samples
