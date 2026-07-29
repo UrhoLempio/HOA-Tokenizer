@@ -1,6 +1,6 @@
 data:
-  train_dir: /Volumes/MyBook/hoa_out_speech_shards/train
-  val_dir: /Volumes/MyBook/hoa_out_speech_shards/test
+  train_dir: /Volumes/MyBook/hoa_out_speech/train
+  val_dir: /Volumes/MyBook/hoa_out_speech/test
 env:
   audio_loader: torchaudio  # 'torchaudio' or 'soundfile'
   use_tqdm: true  # true for tqdm, false for print

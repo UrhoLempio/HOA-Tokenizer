@@ -3,8 +3,14 @@ import math
 import webdataset as wds
 
 if __name__ == "__main__":
-    path = "/Volumes/MyBook/hoa_out_speech_shards/train/"
-    path = glob.glob(f"{path}/*.tar")
+    # path = "/Volumes/MyBook/hoa_out_speech_shards/train/"
+    # path = glob.glob(f"{path}/*.tar")
+    # dataset = wds.WebDataset(path, shardshuffle=1000)
+    # sample = next(iter(dataset))
+    # print(sample.keys())
+
+    path = "./test_data/"
+    path = glob.glob(f"{path}/*.wav")
     dataset = wds.WebDataset(path, shardshuffle=1000)
     sample = next(iter(dataset))
     print(sample.keys())

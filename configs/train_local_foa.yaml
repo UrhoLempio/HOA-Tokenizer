@@ -17,7 +17,7 @@ training:
   train_batch_size: 1
   val_batch_size: 1
   train_num_workers: 1
-  val_num_workers: 2
+  val_num_workers: 1
   pin_memory: true
   lr: 2e-4
   mel_loss_coeff: 45.0
@@ -25,7 +25,7 @@ training:
   bandwidth: 6.6
   spatial_loss_coeff: 0.01
   spatial_loss_every: 1
-  val_every: 10
+  val_every: 1
   save_every: 10
   sample_every: 10
   max_checkpoints: 10

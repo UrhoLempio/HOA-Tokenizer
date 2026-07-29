@@ -9,12 +9,12 @@ import torchaudio
 from model import HOA_WavTokenizer
 from discriminator import DACDiscriminator, MultiPeriodDiscriminator, MultiResolutionDiscriminator
 from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, FeatureMatchingLoss, DACGANLoss
+import auraloss
+from angular_error import angular_error
 from dataloader import get_dataloaders, set_audio_loader, set_target_channels
-from SpatialConsistency import SpatialConsistency
+from SpatialConsistency import SpatialConsistency, estimate_direction_of_arrival
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import autocast, GradScaler
-
-
 
 # TQDM switch since cluster terminals may not support it. Use config to set this.
 USE_TQDM = False
@@ -29,7 +29,8 @@ except ImportError:
 def validate(model: torch.nn.Module, 
              val_loader: torch.utils.data.DataLoader, 
              mel_loss_fn: torch.nn.Module, 
-             device: torch.device) -> tuple[float, torch.Tensor, str]:
+             mrstft_loss_fn: torch.nn.Module,
+             device: torch.device) -> tuple:
     """
     Convenience function to validate the model on the validation set.
     This function runs the model on the validation set and computes the average mel loss.
@@ -43,12 +44,18 @@ def validate(model: torch.nn.Module,
             the validation dataloader
     mel_loss_fn: torch.nn.Module
             the mel loss function to use for validation
+    mrstft_loss_fn: torch.nn.Module
+            the multi-resolution STFT loss function to use for validation
     device: torch.device
             the device to run the validation on
     Returns:
     -----------
     val_loss: float
             the average validation loss over the validation set
+    mrstft_loss: float
+            the average multi-resolution STFT loss over the validation set
+    angular_error: float
+            the average angular error over the validation set
     sample_audio: torch.Tensor
             a sample audio from the validation set
     sample_source: str
@@ -56,7 +63,10 @@ def validate(model: torch.nn.Module,
     """
     model.eval()
 
+    
     val_losses = []
+    mrstft_losses = []
+    angular_errors = []
     sample_audio = None
     sample_source = "unknown"
     with torch.no_grad():
@@ -64,13 +74,21 @@ def validate(model: torch.nn.Module,
         # For now we just want to check if the validation loop runs and produces reasonable output.
         # This is a speed hack to avoid running the full validation which can be time consuming.
         # TODO stft distance, angular error and plot to tensorboard
+        
         for i, batch in enumerate(val_loader):
             if i > 20:
                 break   
             audio_input = batch["audio"].to(device)
-            out = model(audio_input)
+            out = model(audio_input, bandwidth=6.6)
             audio_hat = out["audio"]
+
+            az_hat, el_hat, _ = estimate_direction_of_arrival(audio_hat)
+            az_input, el_input, _ = estimate_direction_of_arrival(audio_input)            
+
             val_losses.append(mel_loss_fn(audio_hat, audio_input).item())
+            mrstft_losses.append(mrstft_loss_fn(audio_hat, audio_input).item())
+            angular_errors.append(angular_error(az_hat, el_hat, az_input, el_input).item())
+
             if sample_audio is None:
                 sample_audio = audio_hat[0].detach().cpu()
                 sample_source = batch["source"][0]
@@ -80,7 +98,7 @@ def validate(model: torch.nn.Module,
     if not val_losses:
         raise RuntimeError("Validation loader is empty.")
 
-    return sum(val_losses) / len(val_losses), sample_audio, sample_source
+    return sum(val_losses) / len(val_losses), sum(mrstft_losses) / len(mrstft_losses), sum(angular_errors) / len(angular_errors), sample_audio, sample_source
 
 
 def load_config(config_path: Path):
@@ -166,6 +184,7 @@ def main(config):
     samples_dir = Path(config["io"].get("generator_samples_dir", "./generator_samples"))
     val_samples_dir = Path(config["io"].get("val_samples_dir", "./val_samples"))
     logs_dir = Path(config["io"].get("log_dir", "./logs"))
+    bandwidth = config_float(config, "model", "bandwidth", 6.6)
     in_channels = config_int(config, "model", "in_channels", 4)
     train_batch_size = config_int(config, "training", "train_batch_size", 2)
     val_batch_size = config_int(config, "training", "val_batch_size", 2)
@@ -220,7 +239,7 @@ def main(config):
     # Model
     model = HOA_WavTokenizer(in_channels=in_channels).to(device)
 
-    # Optional print of model parameters (71.69M parameters)
+    # Optional print of model parameters (74.69M parameters)
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters())
     total_params = count_parameters(model)
@@ -239,6 +258,9 @@ def main(config):
     disc_loss_fn = DiscriminatorLoss().to(device)
     feat_match_loss_fn = FeatureMatchingLoss().to(device)
     dac_loss = DACGANLoss(disc_dac).to(device)
+
+    # Metrics
+    mrstft_loss_fn = auraloss.freq.MultiResolutionSTFTLoss()
 
     # Optimizers
     opt_gen = torch.optim.AdamW(model.parameters(), lr=learning_rate)
@@ -309,7 +331,7 @@ def main(config):
                 opt_disc.zero_grad(set_to_none=True)
 
                 with torch.no_grad():
-                    out = model(audio_input)
+                    out = model(audio_input, bandwidth=6.6)
                     audio_hat = out["audio"]
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
@@ -334,9 +356,9 @@ def main(config):
                     loss_mrd = loss_mrd / len(loss_mrd_real)
                     loss_mrd_total += loss_mrd
 
-                    loss_dac = loss_dac_total / audio_input.size(1)
-                    loss_mp = loss_mp_total / audio_input.size(1)
-                    loss_mrd = loss_mrd_total / audio_input.size(1)
+                    loss_dac = loss_dac_total
+                    loss_mp = loss_mp_total
+                    loss_mrd = loss_mrd_total
 
                     loss_disc = loss_mp + mrd_loss_coeff * loss_mrd + loss_dac
 
@@ -393,12 +415,12 @@ def main(config):
 
                     loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
                     loss_fm_mrd_total += loss_fm_mrd
-                    loss_dac_1 = loss_dac_1_total / audio_input.size(1)
-                    loss_dac_2 = loss_dac_2_total / audio_input.size(1)
-                    loss_gen_mp = loss_gen_mp_total / audio_input.size(1)
-                    loss_fm_mp = loss_fm_mp_total / audio_input.size(1)
-                    loss_gen_mrd = loss_gen_mrd_total / audio_input.size(1)
-                    loss_fm_mrd = loss_fm_mrd_total / audio_input.size(1)
+                    loss_dac_1 = loss_dac_1_total
+                    loss_dac_2 = loss_dac_2_total
+                    loss_gen_mp = loss_gen_mp_total
+                    loss_fm_mp = loss_fm_mp_total
+                    loss_gen_mrd = loss_gen_mrd_total
+                    loss_fm_mrd = loss_fm_mrd_total
 
                 else:
                     # pretraining phase
@@ -507,10 +529,12 @@ def main(config):
                 writer.flush()
 
             if global_step != 0 and global_step % val_every == 0:
-                val_loss, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, device)
+                val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, device)
                 writer.add_scalar("loss/val_mel", val_loss, global_step)
+                writer.add_scalar("loss/val_mrstft", mrstft_loss, global_step)
+                writer.add_scalar("loss/val_angular", angular_error, global_step)
                 writer.flush()
-                print(f"[{global_step}] Val mel: {val_loss:.4f}", flush=True)
+                print(f"[{global_step}] Val mel: {val_loss:.4f} MRSTFT: {mrstft_loss:.4f} Angular: {angular_error:.4f}", flush=True)
                 torchaudio.save(
                     str(val_samples_dir / f"val_{global_step}_{val_reference_fname}.wav"),
                     val_sample,
