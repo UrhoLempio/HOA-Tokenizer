@@ -6,6 +6,7 @@ import psutil
 
 import torch
 import torchaudio
+import torch.distributed as dist
 from model import HOA_WavTokenizer
 from discriminator import DACDiscriminator, MultiPeriodDiscriminator, MultiResolutionDiscriminator
 from loss import MelSpecReconstructionLoss, GeneratorLoss, DiscriminatorLoss, FeatureMatchingLoss, DACGANLoss
@@ -15,6 +16,7 @@ from dataloader import get_dataloaders, set_audio_loader, set_target_channels
 from SpatialConsistency import SpatialConsistency, estimate_direction_of_arrival
 from torch.utils.tensorboard import SummaryWriter
 from torch.amp import autocast, GradScaler
+from torch.nn.parallel import DistributedDataParallel as DDP
 
 # TQDM switch since cluster terminals may not support it. Use config to set this.
 USE_TQDM = False
@@ -25,11 +27,23 @@ try:
 except ImportError:
     _HAS_YAML = False
 
+def setup_ddp():
+    dist.init_process_group(backend="nccl")
+    
+    rank = dist.get_rank()
+    local_rank = int(os.environ["LOCAL_RANK"])
+    world_size = dist.get_world_size()
+    
+    torch.cuda.set_device(local_rank)
+    
+    return rank, local_rank, world_size
+
 
 def validate(model: torch.nn.Module, 
              val_loader: torch.utils.data.DataLoader, 
              mel_loss_fn: torch.nn.Module, 
              mrstft_loss_fn: torch.nn.Module,
+             bandwidth: float,
              device: torch.device) -> tuple:
     """
     Convenience function to validate the model on the validation set.
@@ -79,7 +93,7 @@ def validate(model: torch.nn.Module,
             if i > 20:
                 break   
             audio_input = batch["audio"].to(device)
-            out = model(audio_input, bandwidth=6.6)
+            out = model(audio_input, bandwidth=bandwidth)
             audio_hat = out["audio"]
 
             az_hat, el_hat, _ = estimate_direction_of_arrival(audio_hat)
@@ -87,7 +101,7 @@ def validate(model: torch.nn.Module,
 
             val_losses.append(mel_loss_fn(audio_hat, audio_input).item())
             mrstft_losses.append(mrstft_loss_fn(audio_hat, audio_input).item())
-            angular_errors.append(angular_error(az_hat, el_hat, az_input, el_input).item())
+            angular_errors.append(angular_error(az_hat, el_hat, az_input, el_input).mean().item())
 
             if sample_audio is None:
                 sample_audio = audio_hat[0].detach().cpu()
@@ -205,10 +219,9 @@ def main(config):
     max_checkpoints = config_int(config, "training", "max_checkpoints", 5)
     learning_rate = config_float(config, "training", "lr", 2e-4)
 
-    if config["training"].get("device", "auto") == "auto":
-        device = "cuda" if torch.cuda.is_available() else "cpu"
-    else:
-        device = config["training"]["device"]
+    # Device setup
+    rank, local_rank, world_size = setup_ddp()
+    device = torch.device(f"cuda:{local_rank}")
 
     # Set audio loader to torchaudio or soundfile based on config
     audio_loader = config.get("env", {}).get("audio_loader", "torchaudio")
@@ -222,7 +235,8 @@ def main(config):
         path.mkdir(parents=True, exist_ok=True)
 
     # Initialize TensorBoard writer
-    writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
+    if rank == 0:
+        writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
 
     # Get dataloaders
     train_loader, val_loader = get_dataloaders(
@@ -238,17 +252,26 @@ def main(config):
 
     # Model
     model = HOA_WavTokenizer(in_channels=in_channels).to(device)
+    model = DDP(
+        model,
+        device_ids=[local_rank],
+        output_device=local_rank,
+        )
 
     # Optional print of model parameters (74.69M parameters)
     def count_parameters(model):
         return sum(p.numel() for p in model.parameters())
-    total_params = count_parameters(model)
-    print(f"Model parameters: {total_params / 1e6:.2f}M") 
+    if rank == 0:
+        total_params = count_parameters(model)
+        print(f"Model parameters: {total_params / 1e6:.2f}M") 
 
     # Discriminators
     disc_mpd = MultiPeriodDiscriminator(in_channels=in_channels).to(device)
+    disc_mpd = DDP(disc_mpd, device_ids=[local_rank], output_device=local_rank)
     disc_mrd = MultiResolutionDiscriminator(in_channels=in_channels).to(device)
+    disc_mrd = DDP(disc_mrd, device_ids=[local_rank], output_device=local_rank)
     disc_dac = DACDiscriminator(in_channels=in_channels).to(device)
+    disc_dac = DDP(disc_dac, device_ids=[local_rank], output_device=local_rank)
     discriminators = [disc_mpd, disc_mrd, disc_dac]
 
     # Losses 
@@ -270,8 +293,8 @@ def main(config):
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
     # AMP
-    use_amp = device == "cuda"
-    scaler = GradScaler(device) if use_amp else None
+    use_amp = True
+    scaler = GradScaler(device.type) if use_amp else None
 
     # Checkpoint loading
     resume_path = None
@@ -285,24 +308,25 @@ def main(config):
     if resume_path is not None and resume_path.exists():
         ckpt = torch.load(resume_path, map_location=device)
 
-        model.load_state_dict(ckpt["model"])
-        disc_mpd.load_state_dict(ckpt["disc_mpd"])
-        disc_mrd.load_state_dict(ckpt["disc_mrd"])
-        disc_dac.load_state_dict(ckpt["disc_dac"])
+        model.module.load_state_dict(ckpt["model"])
+        disc_mpd.module.load_state_dict(ckpt["disc_mpd"])
+        disc_mrd.module.load_state_dict(ckpt["disc_mrd"])
+        disc_dac.module.load_state_dict(ckpt["disc_dac"])
 
         opt_gen.load_state_dict(ckpt["opt_gen"])
         opt_disc.load_state_dict(ckpt["opt_disc"])
 
         global_step = ckpt["step"]
         best_val_loss = ckpt.get("best_val_loss", float("inf"))
-
-        print(f"✅ Resumed from step {global_step}")
+        if rank == 0:
+            print(f"✅ Resumed from step {global_step}")
 
     else:
         global_step = 0
     
     #############################
-    print("Starting training...")
+    if rank == 0:
+        print("Starting training...")
     #############################
 
     if USE_TQDM:
@@ -313,7 +337,8 @@ def main(config):
     batch = next(iter(train_loader))
 
     # Sanity check for batch shape
-    print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
+    if rank == 0:
+        print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
 
     while global_step < max_steps:  
         for batch in train_loader:
@@ -331,12 +356,12 @@ def main(config):
                 opt_disc.zero_grad(set_to_none=True)
 
                 with torch.no_grad():
-                    out = model(audio_input, bandwidth=6.6)
+                    out = model(audio_input, bandwidth=bandwidth)
                     audio_hat = out["audio"]
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
-                with autocast(device_type=device, enabled=use_amp):
+                with autocast(device_type=device.type, enabled=use_amp):
                     # TODO change the discriminators for four channels instead
                     loss_dac_total += dac_loss.discriminator_loss(audio_hat, audio_input)
                     
@@ -377,8 +402,8 @@ def main(config):
             # GENERATOR STEP
             # ==================================================
             opt_gen.zero_grad()
-            with autocast(device_type=device, enabled=use_amp):
-                out = model(audio_input, bandwidth=6.6)
+            with autocast(device_type=device.type, enabled=use_amp):
+                out = model(audio_input, bandwidth=bandwidth)
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
                 if global_step % 10 == 0:
@@ -498,7 +523,7 @@ def main(config):
             # ==================================================
             # LOGGING & CHECKPOINTS
             # ==================================================
-            if global_step % 10 == 0:
+            if rank == 0 and global_step % 10 == 0:
                 print(
                     f"[{global_step}] "
                     f"Gen: {loss_gen.item():.4f} | "
@@ -515,7 +540,7 @@ def main(config):
                 writer.add_scalar("loss/gen_mp", loss_gen_mp, global_step)
                 writer.add_scalar("loss/gen_mrd", loss_gen_mrd, global_step)
              
-            if spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
+            if rank == 0 and spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
                 writer.add_scalar("loss/spatial", spatial_loss.item(), global_step)
                 writer.add_scalar("debug/mask_ratio", mask_ratio.item(), global_step)
                 writer.add_scalar("debug/spatial_weighted",
@@ -525,57 +550,59 @@ def main(config):
 
 
 
-            if global_step % 200 == 0:    
+            if rank == 0 and global_step % 200 == 0:    
                 writer.flush()
-
             if global_step != 0 and global_step % val_every == 0:
-                val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, device)
-                writer.add_scalar("loss/val_mel", val_loss, global_step)
-                writer.add_scalar("loss/val_mrstft", mrstft_loss, global_step)
-                writer.add_scalar("loss/val_angular", angular_error, global_step)
-                writer.flush()
-                print(f"[{global_step}] Val mel: {val_loss:.4f} MRSTFT: {mrstft_loss:.4f} Angular: {angular_error:.4f}", flush=True)
-                torchaudio.save(
-                    str(val_samples_dir / f"val_{global_step}_{val_reference_fname}.wav"),
-                    val_sample,
-                    24000,
-                )
+                dist.barrier()  # Ensure all processes have completed before validation and checkpointing
+                if rank == 0 and global_step != 0 and global_step % val_every == 0:
+                    val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, bandwidth, device)
+                    writer.add_scalar("loss/val_mel", val_loss, global_step)
+                    writer.add_scalar("loss/val_mrstft", mrstft_loss, global_step)
+                    writer.add_scalar("loss/val_angular", angular_error, global_step)
+                    writer.flush()
+                    print(f"[{global_step}] Val mel: {val_loss:.4f} MRSTFT: {mrstft_loss:.4f} Angular: {angular_error:.4f}", flush=True)
+                    torchaudio.save(
+                        str(val_samples_dir / f"val_{global_step}_{val_reference_fname}.wav"),
+                        val_sample,
+                        24000,
+                    )
 
-                if val_loss < best_val_loss:
-                    best_val_loss = val_loss
-                    best_checkpoint = {
-                        "model": model.state_dict(),
-                        "disc_mpd": disc_mpd.state_dict(),
-                        "disc_mrd": disc_mrd.state_dict(),
-                        "disc_dac": disc_dac.state_dict(),
-                        "opt_gen": opt_gen.state_dict(),
-                        "opt_disc": opt_disc.state_dict(),
-                        "step": global_step,
-                        "best_val_loss": best_val_loss,
-                    }
-                    torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best.pt"))
-                    with open(
-                        checkpoint_dir / "checkpoint_best_info.txt",
-                        "w"
-                    ) as f:
-                        f.write(
-                            f"step={global_step}\n"
-                            f"val_loss={best_val_loss}\n"
-                        )
-                            
-                    print(
-                        f"✅ New best validation checkpoint "
-                        f"(step {global_step}, "
-                        f"val={best_val_loss:.4f})",
-                        flush=True,
-                        )
+                    if val_loss < best_val_loss:
+                        best_val_loss = val_loss
+                        best_checkpoint = {
+                            "model": model.module.state_dict(),
+                            "disc_mpd": disc_mpd.module.state_dict(),
+                            "disc_mrd": disc_mrd.module.state_dict(),
+                            "disc_dac": disc_dac.module.state_dict(),
+                            "opt_gen": opt_gen.state_dict(),
+                            "opt_disc": opt_disc.state_dict(),
+                            "step": global_step,
+                            "best_val_loss": best_val_loss,
+                        }
+                        torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best.pt"))
+                        with open(
+                            checkpoint_dir / "checkpoint_best_info.txt",
+                            "w"
+                        ) as f:
+                            f.write(
+                                f"step={global_step}\n"
+                                f"val_loss={best_val_loss}\n"
+                            )
+                                
+                        print(
+                            f"✅ New best validation checkpoint "
+                            f"(step {global_step}, "
+                            f"val={best_val_loss:.4f})",
+                            flush=True,
+                            )
+                dist.barrier()  # Ensure all processes have completed before continuing training
 
-            if global_step != 0 and global_step % save_every == 0:
+            if rank == 0 and global_step != 0 and global_step % save_every == 0:
                 checkpoint = {
-                    "model": model.state_dict(),
-                    "disc_mpd": disc_mpd.state_dict(),
-                    "disc_mrd": disc_mrd.state_dict(),
-                    "disc_dac": disc_dac.state_dict(),
+                    "model": model.module.state_dict(),
+                    "disc_mpd": disc_mpd.module.state_dict(),
+                    "disc_mrd": disc_mrd.module.state_dict(),
+                    "disc_dac": disc_dac.module.state_dict(),
                     "opt_gen": opt_gen.state_dict(),
                     "opt_disc": opt_disc.state_dict(),
                     "step": global_step,
@@ -594,14 +621,14 @@ def main(config):
 
                 print(f"✅ Saved checkpoint at step {global_step}", flush=True)
 
-            if global_step != 0 and global_step % sample_every == 0:
+            if rank == 0 and global_step != 0 and global_step % sample_every == 0:
                 torchaudio.save(
                     str(samples_dir / f"sample_{global_step}.wav"),
                     audio_hat[0].detach().cpu(),
                     24000,
                 )
 
-            if global_step != 0 and global_step % 100 == 0:
+            if rank == 0 and global_step != 0 and global_step % 100 == 0:
                 total = 0
                 parent = psutil.Process()
 
@@ -622,12 +649,14 @@ def main(config):
             # ==================================================
             if USE_TQDM:
                 pbar.update(1)
-                if global_step % 100 == 0:
+                if rank == 0 and global_step % 100 == 0:
                     pbar.set_description(
                         f"G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}"
                     )
-    writer.close()
-    print("Training completed successfully!")
+    if rank == 0:
+        writer.close()
+        print("Training completed successfully!")
+    dist.destroy_process_group()
 
 if __name__ == "__main__":
     args = parse_args()

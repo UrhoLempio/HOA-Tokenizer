@@ -1,8 +1,11 @@
+import os
+
 from torch.utils.data import DataLoader
 import webdataset as wds
 import glob
 import torch
 import io
+import torch.distributed as dist
 
 # Global setting for which audio loader to use
 AUDIO_LOADER = 'torchaudio'  # 'torchaudio' or 'soundfile'
@@ -79,13 +82,27 @@ def get_dataloaders(
     pin_memory=True,
     target_channels=4,
 ):
-    train_shard_paths = glob.glob(f"{train_dir}/*.tar")
+    train_shard_paths = sorted(glob.glob(f"{train_dir}/*.tar"))
     if not train_shard_paths:
         raise FileNotFoundError(
             f"No .tar files found in {train_dir}. "
             f"Check that the path exists and contains .tar shards."
         )
-    
+
+    if dist.is_available() and dist.is_initialized():
+        rank = dist.get_rank()
+        world_size = dist.get_world_size()
+        train_shard_paths = train_shard_paths[rank::world_size]
+        if not train_shard_paths:
+            raise RuntimeError(
+                f"Rank {rank} received no shards."
+            )
+        
+        print(
+            f"Rank {rank}: "
+            f"{len(train_shard_paths)} train shards, "
+            f"first={os.path.basename(train_shard_paths[0])}"
+        )
     train_dataset = (
         wds.WebDataset(train_shard_paths, shardshuffle=200) #shardshuffle=1000 for more randomness
         .map(preprocess_target_channels)
@@ -124,7 +141,7 @@ def get_dataloaders(
 
 def main():
     "Main function to test the dataloader functionality."
-    data_dir = "/Volumes/MyBook/hoa_out_speech_shards/train/"
+    data_dir = "./test_data/test/"
     train_loader, val_loader = get_dataloaders(
         train_dir=data_dir,
         val_dir=data_dir,
