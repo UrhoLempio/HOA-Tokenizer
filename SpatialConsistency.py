@@ -461,15 +461,15 @@ def estimate_direction_of_arrival(audio_signal: torch.Tensor,
 
 
 if __name__ == "__main__":
-    torch.manual_seed(1234)
+    torch.manual_seed(4234)
     n_samples = 8192
     reference = torch.randn(n_samples, 4)
-    target = reference + 0.01 * torch.randn(n_samples, 4)
+    target = torch.randn(n_samples, 4)
 
     calculator = SpatialConsistency()
     loss, mask_ratio = calculator.compute_spatial_consistency(
     reference,
-    target,
+    reference,
 )
 
     print(f"loss={loss.item():.4f}")

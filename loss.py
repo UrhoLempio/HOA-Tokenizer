@@ -161,6 +161,7 @@ class DACGANLoss(nn.Module):
                 loss_feature += F.l1_loss(d_fake[i][j], d_real[i][j].detach())
         return loss_g, loss_feature
 
+
 if __name__ == "__main__":
     # Test the loss functions with random inputs
     batch_size = 4
