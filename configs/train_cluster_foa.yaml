@@ -14,7 +14,7 @@ model:
 training:
   max_steps: 50000
   pretrain_mel_steps: 0 #0 is default
-  train_batch_size: 16
+  train_batch_size: 16 #128
   val_batch_size: 4
   train_num_workers: 8
   val_num_workers: 2
@@ -24,7 +24,7 @@ training:
   mrd_loss_coeff: 1.0
   bandwidth: 6.6
   commit_loss_coeff: 1000
-  spatial_loss_coeff: 30
+  spatial_loss_coeff: 1
   spatial_loss_every: 1
   val_every: 5000
   save_every: 5000
