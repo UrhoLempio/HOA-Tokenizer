@@ -90,6 +90,14 @@ def validate(model: torch.nn.Module,
                 az_input.shape,
                 el_input.shape
             )
+            self_error = angular_error(
+            az_input,
+            el_input,
+            az_input,
+            el_input
+            ).item()
+            
+            print("Self error:", self_error)
 
 
             if sample_audio is None:

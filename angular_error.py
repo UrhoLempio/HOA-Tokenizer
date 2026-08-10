@@ -46,3 +46,12 @@ if __name__ == "__main__":
     print(f"Ground truth azimuth: {az2}, Ground truth elevation: {el2}")
     error = angular_error(az1, el1, az2, el2)
     print("Angular error (radians):", error)
+
+    err = angular_error(
+                torch.tensor(0.0),
+                torch.tensor(0.0),
+                torch.tensor(torch.pi / 2),
+                torch.tensor(0.0),
+)
+
+    print(err.item())

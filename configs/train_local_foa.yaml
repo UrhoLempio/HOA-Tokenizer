@@ -23,7 +23,7 @@ training:
   mel_loss_coeff: 45.0
   mrd_loss_coeff: 1.0
   bandwidth: 6.6
-  spatial_loss_coeff: 0.01
+  spatial_loss_coeff: 1
   spatial_loss_every: 1
   val_every: 1
   save_every: 10
