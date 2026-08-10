@@ -13,8 +13,8 @@ model:
   in_channels: 4
 training:
   max_steps: 50000
-  pretrain_mel_steps: 0 #0 is default
-  train_batch_size: 16 #128
+  pretrain_mel_steps: 0
+  train_batch_size: 16 
   val_batch_size: 4
   train_num_workers: 8
   val_num_workers: 2

@@ -70,10 +70,6 @@ def validate(model: torch.nn.Module,
     sample_audio = None
     sample_source = "unknown"
     with torch.no_grad():
-        # Change to "batch in val_loader" when full validation is needed.
-        # For now we just want to check if the validation loop runs and produces reasonable output.
-        # This is a speed hack to avoid running the full validation which can be time consuming.
-        # TODO stft distance, angular error and plot to tensorboard
         
         for i, batch in enumerate(val_loader):
             if i > 20:
@@ -87,7 +83,14 @@ def validate(model: torch.nn.Module,
 
             val_losses.append(mel_loss_fn(audio_hat, audio_input).item())
             mrstft_losses.append(mrstft_loss_fn(audio_hat, audio_input).item())
-            angular_errors.append(angular_error(az_hat, el_hat, az_input, el_input).item())
+            angular_errors.append(angular_error(az_hat, el_hat, az_input, el_input).mean().item())
+            print(
+                az_hat.shape,
+                el_hat.shape,
+                az_input.shape,
+                el_input.shape
+            )
+
 
             if sample_audio is None:
                 sample_audio = audio_hat[0].detach().cpu()
@@ -270,7 +273,7 @@ def main(config):
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
     # AMP
-    use_amp = device == "cuda"
+    use_amp = False
     scaler = GradScaler(device) if use_amp else None
 
     # Checkpoint loading
