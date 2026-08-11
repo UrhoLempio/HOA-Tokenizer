@@ -4,7 +4,7 @@
 #SBATCH --partition=gpumedium
 #SBATCH --time=00:30:00
 #SBATCH --nodes=1
-#SBATCH --ntasks-per-node=4 --cpus-per-task=72  # The product should be 288
+#SBATCH --ntasks-per-node=1 --cpus-per-task=72  # The product should be 288
 #SBATCH --gres=gpu:gh200:4  # 4 GPUs per node
 #SBATCH --mem=868344
 #SBATCH --output=slurm-%j.out

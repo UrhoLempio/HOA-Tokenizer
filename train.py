@@ -222,6 +222,12 @@ def main(config):
     # Device setup
     rank, local_rank, world_size = setup_ddp()
     device = torch.device(f"cuda:{local_rank}")
+    print(
+        f"rank={rank}, "
+        f"local_rank={local_rank}, "
+        f"world_size={world_size}",
+        flush=True
+    )
 
     # Set audio loader to torchaudio or soundfile based on config
     audio_loader = config.get("env", {}).get("audio_loader", "torchaudio")
