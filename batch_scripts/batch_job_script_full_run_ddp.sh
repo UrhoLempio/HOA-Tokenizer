@@ -6,8 +6,10 @@
 #SBATCH --nodes=1
 #SBATCH --ntasks-per-node=4 --cpus-per-task=72  # The product should be 288
 #SBATCH --gres=gpu:gh200:4  # 4 GPUs per node
+#SBATCH --mem=868344
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.err
+
 
 module purge
 module load python-pytorch/2.10
@@ -20,5 +22,7 @@ export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}
 echo "Running on $(hostname)"
 nvidia-smi
 
+export PYTHONUNBUFFERED=1
+
 # Run training (UNBUFFERED!)
-srun PYTHONUNBUFFERED=1 torchrun --standalone --nnodes=1 --nproc_per_node=4 train.py configs/train_cluster_foa.yaml
+srun torchrun --standalone --nnodes=1 --nproc_per_node=4 train.py configs/train_cluster_foa.yaml
