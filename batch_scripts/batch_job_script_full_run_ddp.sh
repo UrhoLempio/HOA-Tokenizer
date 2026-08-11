@@ -10,7 +10,7 @@
 #SBATCH --error=slurm-%j.err
 
 module purge
-module load pytorch/2.10
+module load python-pytorch/2.10
 
 source /projappl/project_2013256/lempio/hoa_env1/bin/activate
 
