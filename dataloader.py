@@ -89,20 +89,20 @@ def get_dataloaders(
             f"Check that the path exists and contains .tar shards."
         )
 
-    if dist.is_available() and dist.is_initialized():
-        rank = dist.get_rank()
-        world_size = dist.get_world_size()
-        train_shard_paths = train_shard_paths[rank::world_size]
-        if not train_shard_paths:
-            raise RuntimeError(
-                f"Rank {rank} received no shards."
-            )
+    # if dist.is_available() and dist.is_initialized():
+    #     rank = dist.get_rank()
+    #     world_size = dist.get_world_size()
+    #     train_shard_paths = train_shard_paths[rank::world_size]
+    #     if not train_shard_paths:
+    #         raise RuntimeError(
+    #             f"Rank {rank} received no shards."
+    #         )
         
-        print(
-            f"Rank {rank}: "
-            f"{len(train_shard_paths)} train shards, "
-            f"first={os.path.basename(train_shard_paths[0])}"
-        )
+    #     print(
+    #         f"Rank {rank}: "
+    #         f"{len(train_shard_paths)} train shards, "
+    #         f"first={os.path.basename(train_shard_paths[0])}"
+    #     )
     train_dataset = (
         wds.WebDataset(train_shard_paths, shardshuffle=200) #shardshuffle=1000 for more randomness
         .map(preprocess_target_channels)
