@@ -558,10 +558,9 @@ def main(config):
 
             if rank == 0 and global_step % 200 == 0:    
                 writer.flush()
-            if global_step != 0 and global_step % val_every == 0:
-                dist.barrier()  # Ensure all processes have completed before validation and checkpointing
-                if rank == 0 and global_step != 0 and global_step % val_every == 0:
-                    val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, bandwidth, device)
+            if global_step != 0 and global_step % val_every == 0:                
+                val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, bandwidth, device)
+                if rank == 0:
                     writer.add_scalar("loss/val_mel", val_loss, global_step)
                     writer.add_scalar("loss/val_mrstft", mrstft_loss, global_step)
                     writer.add_scalar("loss/val_angular", angular_error, global_step)
