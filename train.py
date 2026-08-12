@@ -545,14 +545,36 @@ def main(config):
                 writer.add_scalar("loss/commit", commit_loss.item(), global_step)
                 writer.add_scalar("loss/gen_mp", loss_gen_mp, global_step)
                 writer.add_scalar("loss/gen_mrd", loss_gen_mrd, global_step)
-             
+                writer.add_scalars(
+                    "loss/discriminators",
+                    {
+                        "mpd": loss_mp.item(),
+                        "mrd": loss_mrd.item(),
+                        "dac": loss_dac.item(),
+                    },
+                    global_step,
+                )
+                writer.add_scalars(
+                    "loss/feature_matching",
+                    {
+                        "mpd": loss_fm_mp.item(),
+                        "mrd": loss_fm_mrd.item(),
+                    },
+                    global_step,
+                )
+                            
             if rank == 0 and spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
                 writer.add_scalar("loss/spatial", spatial_loss.item(), global_step)
                 writer.add_scalar("debug/mask_ratio", mask_ratio.item(), global_step)
-                writer.add_scalar("debug/spatial_weighted",
-                                (spatial_loss_coeff * spatial_loss).item(),
-                                global_step
-                                )
+                writer.add_scalars(
+                    "loss/weighted",
+                    {
+                        "mel": (mel_loss_coeff * mel_loss).item(),
+                        "commit": (commit_loss_coeff * commit_loss).item(),
+                        "spatial": (spatial_loss_coeff * spatial_loss).item(),
+                    },
+                    global_step,
+                )
 
 
 
@@ -561,9 +583,15 @@ def main(config):
             if global_step != 0 and global_step % val_every == 0:                
                 val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, bandwidth, device)
                 if rank == 0:
-                    writer.add_scalar("loss/val_mel", val_loss, global_step)
-                    writer.add_scalar("loss/val_mrstft", mrstft_loss, global_step)
-                    writer.add_scalar("loss/val_angular", angular_error, global_step)
+                    writer.add_scalars(
+                        "loss/validation",
+                        {
+                            "mel": val_loss,
+                            "mrstft": mrstft_loss,
+                            "angular": angular_error,
+                        },
+                        global_step,
+                    )
                     writer.flush()
                     print(f"[{global_step}] Val mel: {val_loss:.4f} MRSTFT: {mrstft_loss:.4f} Angular: {angular_error:.4f}", flush=True)
                     torchaudio.save(
