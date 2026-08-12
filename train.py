@@ -210,6 +210,10 @@ def main(config):
     mel_loss_coeff = config_float(config, "training", "mel_loss_coeff", 45.0)
     mrd_loss_coeff = config_float(config, "training", "mrd_loss_coeff", 1.0)
     spatial_loss_coeff = config_float(config, "training", "spatial_loss_coeff", 0.01)
+    # One-time spatial loss boost: set to this value when step >= spatial_boost_step
+    spatial_boost_applied = False
+    spatial_boost_step = 100000
+    spatial_boost_value = 5.0
     commit_loss_coeff = config_float(config, "training", "commit_loss_coeff", 1000.0)
     grad_clip_norm = config_float(config, "training", "grad_clip_norm", 1.0)
     spatial_loss_every = config_int(config, "training", "spatial_loss_every", 5)
@@ -355,6 +359,13 @@ def main(config):
             train_discriminator = global_step >= pretrain_mel_steps
             loss_disc = torch.tensor(0.0, device=device)
 
+            # Apply one-time spatial loss coefficient boost at configured milestone
+            if (not spatial_boost_applied) and global_step >= spatial_boost_step:
+                spatial_loss_coeff = float(spatial_boost_value)
+                spatial_boost_applied = True
+                if rank == 0:
+                    print(f"🔼 Boosted spatial_loss_coeff to {spatial_boost_value} at step {global_step}", flush=True)
+
             # ==================================================
             # DISCRIMINATOR STEP
             # ==================================================
@@ -363,6 +374,7 @@ def main(config):
 
                 with torch.no_grad():
                     out = model(audio_input, bandwidth=bandwidth)
+                    codes = out["codes"]
                     audio_hat = out["audio"]
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
@@ -580,6 +592,28 @@ def main(config):
 
             if rank == 0 and global_step % 200 == 0:    
                 writer.flush()
+            if rank == 0 and global_step % 100 == 0:
+                for q in range(codes.shape[0]):
+                    active_codes = torch.unique(codes[q]).numel()
+                
+                    writer.add_scalar(
+                    f"vq/active_codes_q{q}",
+                    active_codes,
+                    global_step,
+                    )
+                    
+                    writer.add_scalar(
+                    f"vq/utilization_q{q}",
+                    active_codes / 1024.0,
+                    global_step,
+                    )
+                    
+                    writer.add_scalar(
+                    f"vq/dead_codes_q{q}",
+                    1024 - active_codes,
+                    global_step,
+                    )
+                    
             if global_step != 0 and global_step % val_every == 0:                
                 val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, bandwidth, device)
                 if rank == 0:

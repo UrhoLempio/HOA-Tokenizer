@@ -12,9 +12,9 @@ io:
 model:
   in_channels: 4
 training:
-  max_steps: 50000
+  max_steps: 250000 #500,000
   pretrain_mel_steps: 0 #0 is default
-  train_batch_size: 16
+  train_batch_size: 16 #24
   val_batch_size: 4
   train_num_workers: 8
   val_num_workers: 2
@@ -24,7 +24,7 @@ training:
   mrd_loss_coeff: 1.0
   bandwidth: 6.6
   commit_loss_coeff: 1000
-  spatial_loss_coeff: 1
+  spatial_loss_coeff: 1 # boost to five after 100k steps
   spatial_loss_every: 1
   val_every: 5000
   save_every: 5000
