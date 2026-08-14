@@ -25,4 +25,4 @@ nvidia-smi
 export PYTHONUNBUFFERED=1
 
 # Run training (UNBUFFERED!)
-srun torchrun --standalone --nnodes=1 --nproc_per_node=4 train.py configs/train_cluster_foa.yaml
+srun torchrun --standalone --nnodes=1 --nproc_per_node=4 train.py configs/train_cluster_foa_ddp.yaml
