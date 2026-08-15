@@ -233,8 +233,11 @@ class EuclideanCodebook(nn.Module):
         self.embed_avg.data.copy_(embed.clone())
         self.cluster_size.data.copy_(cluster_size)
         self.inited.data.copy_(torch.Tensor([True]))
-        # Make sure all buffers across workers are in sync after initialization
-        broadcast_tensors(self.buffers())
+        # Make sure all buffers across workers are in sync after initialization.
+        # Use an explicit, stable list of buffers so every worker broadcasts the
+        # same number/order of tensors (avoids mismatch when other modules
+        # register different buffers dynamically).
+        broadcast_tensors([self.inited, self.cluster_size, self.embed, self.embed_avg])
 
     def replace_(self, samples, mask):
         modified_codebook = torch.where(
@@ -252,7 +255,9 @@ class EuclideanCodebook(nn.Module):
 
         batch_samples = rearrange(batch_samples, "... d -> (...) d")
         self.replace_(batch_samples, mask=expired_codes)
-        broadcast_tensors(self.buffers())
+        # Broadcast the core buffers explicitly to ensure all ranks see the same
+        # tensor list and avoid `_check_number_of_params` mismatches.
+        broadcast_tensors([self.inited, self.cluster_size, self.embed, self.embed_avg])
 
     def preprocess(self, x):
         x = rearrange(x, "... d -> (...) d")
