@@ -225,19 +225,34 @@ class EuclideanCodebook(nn.Module):
 
     @torch.jit.ignore
     def init_embed_(self, data):
+        # If already initialized locally, we may still need to check whether
+        # other ranks require initialization. Perform a global check and only
+        # let rank 0 run k-means and broadcast results to avoid divergent
+        # collectives.
         if self.inited:
             return
 
+        # If distributed, check whether any rank needs initialization.
+        if is_distributed():
+            need_init = torch.tensor([1 if not bool(self.inited.item()) else 0],
+                                     device=self.cluster_size.device, dtype=torch.long)
+            torch.distributed.all_reduce(need_init, op=torch.distributed.ReduceOp.SUM)
+            if need_init.item() == 0:
+                return
+
+        # Only rank 0 computes k-means to avoid differing results; other ranks
+        # will receive the broadcasted buffers.
+        if is_distributed() and rank() != 0:
+            broadcast_tensors([self.inited, self.cluster_size, self.embed, self.embed_avg], src=0)
+            return
+
+        # Rank 0 computes the initialization and broadcasts to others.
         embed, cluster_size = kmeans(data, self.codebook_size, self.kmeans_iters)  # data unchanged
         self.embed.data.copy_(embed)
         self.embed_avg.data.copy_(embed.clone())
         self.cluster_size.data.copy_(cluster_size)
-        self.inited.data.copy_(torch.Tensor([True]))
-        # Make sure all buffers across workers are in sync after initialization.
-        # Use an explicit, stable list of buffers so every worker broadcasts the
-        # same number/order of tensors (avoids mismatch when other modules
-        # register different buffers dynamically).
-        broadcast_tensors([self.inited, self.cluster_size, self.embed, self.embed_avg])
+        self.inited.data.copy_(torch.tensor([True], device=self.cluster_size.device))
+        broadcast_tensors([self.inited, self.cluster_size, self.embed, self.embed_avg], src=0)
 
     def replace_(self, samples, mask):
         modified_codebook = torch.where(
@@ -249,14 +264,32 @@ class EuclideanCodebook(nn.Module):
         if self.threshold_ema_dead_code == 0:
             return
 
-        expired_codes = self.cluster_size < self.threshold_ema_dead_code
-        if not torch.any(expired_codes):
-            return
+        expired_codes_local = self.cluster_size < self.threshold_ema_dead_code
 
+        # If distributed, compute whether any rank has expired codes. If none,
+        # skip. If some do, let rank 0 perform the replacement and broadcast
+        # the updated buffers so all ranks participate in the same collectives.
+        if is_distributed():
+            expired_any = torch.tensor([1 if torch.any(expired_codes_local) else 0],
+                                       device=self.cluster_size.device, dtype=torch.long)
+            torch.distributed.all_reduce(expired_any, op=torch.distributed.ReduceOp.SUM)
+            if expired_any.item() == 0:
+                return
+
+            # Only rank 0 performs the replacement and broadcasts results.
+            if rank() != 0:
+                broadcast_tensors([self.inited, self.cluster_size, self.embed, self.embed_avg], src=0)
+                return
+
+        else:
+            # Non-distributed fast path: if no expired codes, return.
+            if not torch.any(expired_codes_local):
+                return
+
+        # Rank 0 replacement path (or single-process): perform replacement and
+        # broadcast the core buffers.
         batch_samples = rearrange(batch_samples, "... d -> (...) d")
-        self.replace_(batch_samples, mask=expired_codes)
-        # Broadcast the core buffers explicitly to ensure all ranks see the same
-        # tensor list and avoid `_check_number_of_params` mismatches.
+        self.replace_(batch_samples, mask=expired_codes_local)
         broadcast_tensors([self.inited, self.cluster_size, self.embed, self.embed_avg])
 
     def preprocess(self, x):

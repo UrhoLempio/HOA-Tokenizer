@@ -479,7 +479,8 @@ def main(config):
                     f"audio_hat became non-finite at step {global_step}"
                 )
             # Mel loss
-            mel_loss = mel_loss_fn(audio_hat.float(), audio_input.float())
+            with autocast(device_type=device.type, enabled=False):
+                mel_loss = mel_loss_fn(audio_hat.float(), audio_input.float())
 
             # Total generator loss
             spatial_loss = torch.zeros((), device=device, dtype=torch.float32)
