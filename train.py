@@ -303,7 +303,7 @@ def main(config):
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
     # AMP
-    use_amp = False
+    use_amp = True
     scaler = GradScaler(device.type) if use_amp else None
 
     # Checkpoint loading
