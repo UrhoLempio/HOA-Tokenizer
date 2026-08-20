@@ -379,7 +379,7 @@ def main(config):
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
-                with autocast(device_type=device.type, enabled=use_amp):
+                with autocast(device_type=device.type, enabled=False):
                     # TODO change the discriminators for four channels instead
                     loss_dac_total += dac_loss.discriminator_loss(audio_hat, audio_input)
                     
@@ -420,7 +420,7 @@ def main(config):
             # GENERATOR STEP
             # ==================================================
             opt_gen.zero_grad()
-            with autocast(device_type=device.type, enabled=use_amp):
+            with autocast(device_type=device.type, enabled=False):
                 out = model(audio_input, bandwidth=bandwidth)
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
