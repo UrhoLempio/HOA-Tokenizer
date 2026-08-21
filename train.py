@@ -508,6 +508,38 @@ def main(config):
             )
 
             # DEBUG CHECKS
+            loss_components = {
+                "loss_gen_mp": (loss_gen_mp, 1.0),
+                "loss_gen_mrd": (loss_gen_mrd, mrd_loss_coeff),
+                "loss_fm_mp": (loss_fm_mp, 1.0),
+                "loss_fm_mrd": (loss_fm_mrd, mrd_loss_coeff),
+                "mel_loss": (mel_loss, mel_loss_coeff),
+                "commit_loss": (commit_loss, commit_loss_coeff),
+                "loss_dac_1": (loss_dac_1, 1.0),
+                "loss_dac_2": (loss_dac_2, 1.0),
+                "spatial_loss": (spatial_loss, spatial_loss_coeff),
+            }
+
+            if not torch.isfinite(loss_gen):
+                debug_values = {}
+                for name, (value, coefficient) in loss_components.items():
+                    value_tensor = value if torch.is_tensor(value) else torch.as_tensor(value, device=device)
+                    weighted_value = value_tensor * coefficient
+                    debug_values[name] = {
+                        "raw": value_tensor.detach().float().item(),
+                        "coefficient": coefficient,
+                        "weighted": weighted_value.detach().float().item(),
+                        "finite": bool(torch.isfinite(value_tensor).all()),
+                        "weighted_finite": bool(torch.isfinite(weighted_value).all()),
+                    }
+
+                print(
+                    f"NON-FINITE LOSS DEBUG at step {global_step}, rank {rank}: "
+                    f"loss_gen={loss_gen.detach().float().item()} | "
+                    f"components={debug_values}",
+                    flush=True,
+                )
+
             if not torch.isfinite(mel_loss):
                 raise RuntimeError(
                     f"mel_loss became non-finite at step {global_step}"
