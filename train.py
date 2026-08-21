@@ -439,7 +439,12 @@ def main(config):
                     loss_gen_mrd_total = 0.0
                     loss_fm_mrd_total = 0.0
 
-                    loss_dac_1, loss_dac_2 = dac_loss.generator_loss(audio_hat, audio_input)
+                    # Keep the DAC adversarial and feature-matching losses in float32.
+                    # The feature-matching term (loss_dac_2) was observed to become non-finite under AMP.
+                    with autocast(device_type=device.type, enabled=False):
+                        loss_dac_1, loss_dac_2 = dac_loss.generator_loss(
+                            audio_hat.float(), audio_input.float()
+                        )
                     loss_dac_1_total += loss_dac_1
                     loss_dac_2_total += loss_dac_2
 
