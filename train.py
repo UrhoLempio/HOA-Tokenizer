@@ -456,12 +456,18 @@ def main(config):
                     loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
                     loss_fm_mp_total += loss_fm_mp
 
-                    _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(y=audio_input, y_hat=audio_hat)
-                    loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
-                    loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
-                    loss_gen_mrd_total += loss_gen_mrd
+                    # Keep the MRD spectrogram/discriminator and its losses in float32.
+                    with autocast(device_type=device.type, enabled=False):
+                        _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(
+                            y=audio_input.float(), y_hat=audio_hat.float()
+                        )
+                        loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
+                        loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
+                        loss_fm_mrd = feat_match_loss_fn(
+                            fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd
+                        ) / len(fmap_rs_mrd)
 
-                    loss_fm_mrd = feat_match_loss_fn(fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd) / len(fmap_rs_mrd)
+                    loss_gen_mrd_total += loss_gen_mrd
                     loss_fm_mrd_total += loss_fm_mrd
                     loss_dac_1 = loss_dac_1_total
                     loss_dac_2 = loss_dac_2_total
