@@ -244,10 +244,6 @@ def main(config):
     for path in (checkpoint_dir, samples_dir, val_samples_dir, logs_dir):
         path.mkdir(parents=True, exist_ok=True)
 
-    # Initialize TensorBoard writer
-    if rank == 0:
-        writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
-        
     # Get dataloaders
     train_loader, val_loader = get_dataloaders(
         train_dir,
@@ -326,6 +322,9 @@ def main(config):
         opt_gen.load_state_dict(ckpt["opt_gen"])
         opt_disc.load_state_dict(ckpt["opt_disc"])
 
+        if scaler is not None and ckpt.get("scaler") is not None:
+            scaler.load_state_dict(ckpt["scaler"])
+
         global_step = ckpt["step"]
         best_val_loss = ckpt.get("best_val_loss", float("inf"))
         if rank == 0:
@@ -333,14 +332,21 @@ def main(config):
 
     else:
         global_step = 0
-    
+
+    # Initialize TensorBoard writer
+    if rank == 0:
+        writer = SummaryWriter(
+            log_dir=str(logs_dir / "tensorboard"),
+            purge_step=global_step if resume_path is not None else None,
+        )
+
     #############################
     if rank == 0:
         print("Starting training...")
     #############################
 
     if USE_TQDM:
-        pbar = tqdm(total=max_steps)
+        pbar = tqdm(total=max_steps, initial=global_step)
     else:
         pbar = None
 
@@ -410,7 +416,6 @@ def main(config):
                     scaler.unscale_(opt_disc)
                     torch.nn.utils.clip_grad_norm_(disc_params, grad_clip_norm)
                     scaler.step(opt_disc)
-                    scaler.update()
                 else:
                     loss_disc.backward()
                     torch.nn.utils.clip_grad_norm_(disc_params, grad_clip_norm)
@@ -582,9 +587,61 @@ def main(config):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 opt_gen.step()
 
+            global_step += 1
+
+            # ==================================================
+            # VALIDATION
+            # ==================================================
+
+            if global_step != 0 and global_step % val_every == 0:                
+                            val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, bandwidth, device)
+                            if rank == 0:
+                                writer.add_scalar("loss/validation/mel", val_loss, global_step)
+                                writer.add_scalar("loss/validation/mrstft", mrstft_loss, global_step)
+                                writer.add_scalar("loss/validation/angular", angular_error, global_step)
+                                writer.flush()
+                                print(f"[{global_step}] Val mel: {val_loss:.4f} MRSTFT: {mrstft_loss:.4f} Angular: {angular_error:.4f}", flush=True)
+                                torchaudio.save(
+                                    str(val_samples_dir / f"val_{global_step}_{val_reference_fname}.wav"),
+                                    val_sample,
+                                    24000,
+                                )
+            
+                                if val_loss < best_val_loss:
+                                    best_val_loss = val_loss
+                                    best_checkpoint = {
+                                        "model": model.module.state_dict(),
+                                        "disc_mpd": disc_mpd.module.state_dict(),
+                                        "disc_mrd": disc_mrd.module.state_dict(),
+                                        "disc_dac": disc_dac.module.state_dict(),
+                                        "opt_gen": opt_gen.state_dict(),
+                                        "opt_disc": opt_disc.state_dict(),
+                                        "scaler": scaler.state_dict() if scaler is not None else None,
+                                        "step": global_step,
+                                        "best_val_loss": best_val_loss,
+                                    }
+                                    torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best.pt"))
+                                    with open(
+                                        checkpoint_dir / "checkpoint_best_info.txt",
+                                        "w"
+                                    ) as f:
+                                        f.write(
+                                            f"step={global_step}\n"
+                                            f"val_loss={best_val_loss}\n"
+                                        )
+                                            
+                                    print(
+                                        f"✅ New best validation checkpoint "
+                                        f"(step {global_step}, "
+                                        f"val={best_val_loss:.4f})",
+                                        flush=True,
+                                        )
+                            dist.barrier()  # Ensure all processes have completed before continuing training
+            
             # ==================================================
             # LOGGING & CHECKPOINTS
             # ==================================================
+
             if rank == 0 and global_step % 10 == 0:
                 print(
                     f"[{global_step}] "
@@ -640,50 +697,7 @@ def main(config):
                     global_step,
                     )
 
-            if global_step != 0 and global_step % val_every == 0:                
-                val_loss, mrstft_loss, angular_error, val_sample, val_reference_fname = validate(model, val_loader, mel_loss_fn, mrstft_loss_fn, bandwidth, device)
-                if rank == 0:
-                    writer.add_scalar("loss/validation/mel", val_loss, global_step)
-                    writer.add_scalar("loss/validation/mrstft", mrstft_loss, global_step)
-                    writer.add_scalar("loss/validation/angular", angular_error, global_step)
-                    writer.flush()
-                    print(f"[{global_step}] Val mel: {val_loss:.4f} MRSTFT: {mrstft_loss:.4f} Angular: {angular_error:.4f}", flush=True)
-                    torchaudio.save(
-                        str(val_samples_dir / f"val_{global_step}_{val_reference_fname}.wav"),
-                        val_sample,
-                        24000,
-                    )
-
-                    if val_loss < best_val_loss:
-                        best_val_loss = val_loss
-                        best_checkpoint = {
-                            "model": model.module.state_dict(),
-                            "disc_mpd": disc_mpd.module.state_dict(),
-                            "disc_mrd": disc_mrd.module.state_dict(),
-                            "disc_dac": disc_dac.module.state_dict(),
-                            "opt_gen": opt_gen.state_dict(),
-                            "opt_disc": opt_disc.state_dict(),
-                            "step": global_step,
-                            "best_val_loss": best_val_loss,
-                        }
-                        torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best.pt"))
-                        with open(
-                            checkpoint_dir / "checkpoint_best_info.txt",
-                            "w"
-                        ) as f:
-                            f.write(
-                                f"step={global_step}\n"
-                                f"val_loss={best_val_loss}\n"
-                            )
-                                
-                        print(
-                            f"✅ New best validation checkpoint "
-                            f"(step {global_step}, "
-                            f"val={best_val_loss:.4f})",
-                            flush=True,
-                            )
-                dist.barrier()  # Ensure all processes have completed before continuing training
-
+            
             if rank == 0 and global_step != 0 and global_step % save_every == 0:
                 checkpoint = {
                     "model": model.module.state_dict(),
@@ -692,6 +706,7 @@ def main(config):
                     "disc_dac": disc_dac.module.state_dict(),
                     "opt_gen": opt_gen.state_dict(),
                     "opt_disc": opt_disc.state_dict(),
+                    "scaler": scaler.state_dict() if scaler is not None else None,
                     "step": global_step,
                     "best_val_loss": best_val_loss,
                 }
@@ -729,8 +744,6 @@ def main(config):
                     f"TOTAL RAM: {total/1024**3:.2f} GB"
                 )
 
-            global_step += 1
-
             # ==================================================
             # PROGRESS BAR UPDATE
             # ==================================================
@@ -740,6 +753,11 @@ def main(config):
                     pbar.set_description(
                         f"G:{loss_gen.item():.2f} D:{loss_disc.item():.2f}"
                     )
+            
+            if global_step >= max_steps:
+                            if rank == 0:
+                                print(f"Reached max steps {max_steps}. Exiting training loop.", flush=True)
+                            break
     if rank == 0:
         writer.close()
         print("Training completed successfully!")
