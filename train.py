@@ -244,10 +244,6 @@ def main(config):
     for path in (checkpoint_dir, samples_dir, val_samples_dir, logs_dir):
         path.mkdir(parents=True, exist_ok=True)
 
-    # Initialize TensorBoard writer
-    if rank == 0:
-        writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"), purge_step=global_step)
-
     # Get dataloaders
     train_loader, val_loader = get_dataloaders(
         train_dir,
@@ -333,6 +329,10 @@ def main(config):
 
     else:
         global_step = 0
+
+    # Initialize TensorBoard writer
+        if rank == 0:
+            writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"), purge_step=global_step)
     
     #############################
     if rank == 0:
