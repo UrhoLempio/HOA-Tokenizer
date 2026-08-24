@@ -8,7 +8,7 @@ io:
   checkpoint_dir: ./data-ddp/checkpoints
   generator_samples_dir: ./data-ddp/generator_samples
   val_samples_dir: ./data-ddp/val_samples
-  log_dir: ./data-ddp/logs
+  log_dir: ./data-ddp/logs_from_160k
 model:
   in_channels: 4
 training:
