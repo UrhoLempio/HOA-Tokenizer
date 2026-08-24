@@ -246,7 +246,7 @@ def main(config):
 
     # Initialize TensorBoard writer
     if rank == 0:
-        writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"))
+        writer = SummaryWriter(log_dir=str(logs_dir / "tensorboard"), purge_step=global_step)
 
     # Get dataloaders
     train_loader, val_loader = get_dataloaders(
