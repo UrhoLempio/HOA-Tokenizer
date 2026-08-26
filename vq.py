@@ -702,6 +702,7 @@ class ResidualVectorQuantizer(nn.Module):
 
 
 if __name__ == "__main__":
+
     # Test the ResidualVectorQuantizer with a random input
     vq = ResidualVectorQuantizer(dimension=128, n_q=1, bins=1024)
     x = torch.randn(1, 128, 75)  # Batch size 1, 128 channels, 75 time steps
