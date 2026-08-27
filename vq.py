@@ -265,7 +265,6 @@ class EuclideanCodebook(nn.Module):
             return
 
         expired_codes_local = self.cluster_size < self.threshold_ema_dead_code
-
         # If distributed, compute whether any rank has expired codes. If none,
         # skip. If some do, let rank 0 perform the replacement and broadcast
         # the updated buffers so all ranks participate in the same collectives.

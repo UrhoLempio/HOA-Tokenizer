@@ -213,7 +213,7 @@ def main(config):
     # One-time spatial loss boost: set to this value when step >= spatial_boost_step
     spatial_boost_applied = False
     spatial_boost_step = 100000
-    spatial_boost_value = 5.0
+    spatial_boost_value = 2.0
     commit_loss_coeff = config_float(config, "training", "commit_loss_coeff", 1000.0)
     grad_clip_norm = config_float(config, "training", "grad_clip_norm", 1.0)
     spatial_loss_every = config_int(config, "training", "spatial_loss_every", 5)
