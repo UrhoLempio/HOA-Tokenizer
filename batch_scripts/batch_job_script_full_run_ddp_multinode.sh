@@ -3,7 +3,7 @@
 #SBATCH --account=project_2013256
 #SBATCH --partition=gpularge
 #SBATCH --time=00:10:00
-#SBATCH --nodes=2
+#SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1 --cpus-per-task=64  # The product should be 288
 #SBATCH --gres=gpu:gh200:4  # 4 GPUs per node
 #SBATCH --output=slurm-%j.out
