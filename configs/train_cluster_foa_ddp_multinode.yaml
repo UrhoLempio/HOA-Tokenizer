@@ -17,7 +17,7 @@ training:
   train_batch_size: 4 #24
   val_batch_size: 4
   train_num_workers: 1
-  val_num_workers: 2
+  val_num_workers: 1
   pin_memory: true
   lr: 2e-4
   mel_loss_coeff: 45.0
