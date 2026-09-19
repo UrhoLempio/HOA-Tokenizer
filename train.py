@@ -30,8 +30,7 @@ except ImportError:
 def setup_ddp():
     dist.init_process_group(
         backend="nccl",
-        device_id=torch.device(f"cuda:{local_rank}")
-)
+    )
     
     rank = dist.get_rank()
     local_rank = int(os.environ["LOCAL_RANK"])
