@@ -5,10 +5,10 @@ env:
   audio_loader: soundfile  # 'torchaudio' or 'soundfile'
   use_tqdm: false  # true for tqdm, false for print
 io:
-  checkpoint_dir: /scratch/project_2013256/lempio/data-ddp/checkpoints
-  generator_samples_dir: /scratch/project_2013256/lempio/data-ddp/generator_samples
-  val_samples_dir: /scratch/project_2013256/lempio/data-ddp/val_samples
-  log_dir: /scratch/project_2013256/lempio/data-ddp/logs
+  checkpoint_dir: /projappl/project_2013256/lempio/data-ddp/checkpoints
+  generator_samples_dir: /projappl/project_2013256/lempio/data-ddp/generator_samples
+  val_samples_dir: /projappl/project_2013256/lempio/data-ddp/val_samples
+  log_dir: /projappl/project_2013256/lempio/data-ddp/logs
 model:
   in_channels: 4
 training:
