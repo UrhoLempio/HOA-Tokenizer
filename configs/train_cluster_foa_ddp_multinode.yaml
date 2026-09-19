@@ -16,7 +16,7 @@ training:
   pretrain_mel_steps: 0 #0 is default
   train_batch_size: 4 #24
   val_batch_size: 4
-  train_num_workers: 8
+  train_num_workers: 1
   val_num_workers: 2
   pin_memory: true
   lr: 2e-4
