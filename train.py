@@ -27,6 +27,81 @@ try:
 except ImportError:
     _HAS_YAML = False
 
+def codebook_snapshot(state_dict):
+    return {
+        key: value.detach().cpu().clone()
+        for key, value in state_dict.items()
+        if "._codebook." in key
+        and key.endswith(("inited", "cluster_size", "embed", "embed_avg"))
+    }
+
+
+def report_codebook(label, state):
+    print(label, flush=True)
+    for key, value in state.items():
+        finite = bool(torch.isfinite(value).all())
+        if key.endswith("inited"):
+            details = f"inited={bool(value.item())}"
+        else:
+            details = (
+                f"shape={tuple(value.shape)} "
+                f"min={value.min().item():.6g} "
+                f"max={value.max().item():.6g} "
+                f"mean={value.float().mean().item():.6g}"
+            )
+        print(f"  {key}: finite={finite}, {details}", flush=True)
+
+
+def compare_codebook_snapshots(expected, actual):
+    if expected.keys() != actual.keys():
+        return ["codebook state keys differ"]
+    return [key for key in expected if not torch.equal(expected[key], actual[key])]
+
+
+def save_checkpoint_atomically(checkpoint, checkpoint_path, label):
+    checkpoint_path = Path(checkpoint_path)
+    before_save = codebook_snapshot(checkpoint["model"])
+    if not before_save:
+        raise RuntimeError(f"No codebook buffers found before saving {label}.")
+    report_codebook(f"Codebook before saving {label}", before_save)
+
+    non_finite = [key for key, value in before_save.items() if not torch.isfinite(value).all()]
+    if non_finite:
+        raise RuntimeError(f"Non-finite codebook buffers before saving {label}: {non_finite}")
+
+    temporary_path = checkpoint_path.with_name(
+        f".{checkpoint_path.name}.{os.getpid()}.tmp"
+    )
+    try:
+        torch.save(checkpoint, temporary_path)
+
+        if os.environ.get("VERIFY_CODEBOOK_CHECKPOINTS", "0").lower() in {"1", "true", "yes"}:
+            saved_checkpoint = torch.load(
+                temporary_path,
+                map_location="cpu",
+                weights_only=False,
+            )
+            after_save = codebook_snapshot(saved_checkpoint["model"])
+            report_codebook(f"Codebook read back after saving {label}", after_save)
+            mismatches = compare_codebook_snapshots(before_save, after_save)
+            if mismatches:
+                raise RuntimeError(
+                    f"Codebook round-trip verification failed for {label}: {mismatches}"
+                )
+
+        # Replace only after the temporary checkpoint has been fully written
+        # (and, when enabled, successfully read back and checked).
+        os.replace(temporary_path, checkpoint_path)
+    finally:
+        if temporary_path.exists():
+            temporary_path.unlink()
+
+    print(
+        f"Checkpoint written atomically: {checkpoint_path} "
+        f"({checkpoint_path.stat().st_size} bytes)",
+        flush=True,
+    )
+
 def setup_ddp():
     dist.init_process_group(
         backend="nccl",
@@ -315,8 +390,43 @@ def main(config):
 
     if resume_path is not None and resume_path.exists():
         ckpt = torch.load(resume_path, map_location=device)
+        checkpoint_codebook = codebook_snapshot(ckpt["model"])
+        if not checkpoint_codebook:
+            raise RuntimeError(f"No codebook buffers found in checkpoint {resume_path}.")
+        if rank == 0:
+            report_codebook(
+                f"Codebook in checkpoint before loading (step {ckpt.get('step', 'unknown')})",
+                checkpoint_codebook,
+            )
 
         model.module.load_state_dict(ckpt["model"])
+        loaded_codebook = codebook_snapshot(model.module.state_dict())
+        if rank == 0:
+            report_codebook(
+                f"Codebook after loading checkpoint (rank {rank}, step {ckpt.get('step', 'unknown')})",
+                loaded_codebook,
+            )
+        codebook_mismatches = compare_codebook_snapshots(
+            checkpoint_codebook,
+            loaded_codebook,
+        )
+        verification_failed = torch.tensor(
+            int(bool(codebook_mismatches)),
+            device=device,
+            dtype=torch.int,
+        )
+        dist.all_reduce(verification_failed, op=dist.ReduceOp.MAX)
+        if verification_failed.item():
+            if codebook_mismatches:
+                print(
+                    f"Rank {rank}: loaded codebook differs from checkpoint: "
+                    f"{codebook_mismatches}",
+                    flush=True,
+                )
+            raise RuntimeError("Codebook checkpoint verification failed on at least one rank.")
+        if rank == 0:
+            print("Loaded codebook exactly matches checkpoint on every rank.", flush=True)
+
         disc_mpd.module.load_state_dict(ckpt["disc_mpd"])
         disc_mrd.module.load_state_dict(ckpt["disc_mrd"])
         disc_dac.module.load_state_dict(ckpt["disc_dac"])
@@ -622,7 +732,11 @@ def main(config):
                                         "step": global_step,
                                         "best_val_loss": best_val_loss,
                                     }
-                                    torch.save(best_checkpoint, str(checkpoint_dir / f"checkpoint_best.pt"))
+                                    save_checkpoint_atomically(
+                                        best_checkpoint,
+                                        checkpoint_dir / "checkpoint_best.pt",
+                                        f"best checkpoint at step {global_step}",
+                                    )
                                     with open(
                                         checkpoint_dir / "checkpoint_best_info.txt",
                                         "w"
@@ -712,7 +826,11 @@ def main(config):
                     "step": global_step,
                     "best_val_loss": best_val_loss,
                 }
-                torch.save(checkpoint, str(checkpoint_dir / f"checkpoint_{global_step}.pt"))
+                save_checkpoint_atomically(
+                    checkpoint,
+                    checkpoint_dir / f"checkpoint_{global_step}.pt",
+                    f"checkpoint at step {global_step}",
+                )
 
                 all_ckpts = sorted(
                     [p for p in checkpoint_dir.glob("checkpoint_*.pt") if not p.name.startswith("checkpoint_best")],
