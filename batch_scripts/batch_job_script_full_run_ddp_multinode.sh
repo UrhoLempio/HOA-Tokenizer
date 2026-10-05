@@ -15,7 +15,7 @@ module load python-pytorch/2.10
 source /projappl/project_2013256/lempio/hoa_env1/bin/activate
 
 # Set the number of CPU threads based on cpus-per-task
-export OMP_NUM_THREADS=${SLURM_CPUS_PER_TASK:-1}
+export OMP_NUM_THREADS=$((SLURM_CPUS_PER_TASK / 4))
 
 # Run training (UNBUFFERED!)
 export PYTHONUNBUFFERED=1
