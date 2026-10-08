@@ -3,6 +3,7 @@ import json
 import os
 from pathlib import Path
 import psutil
+import time
 
 import torch
 import torchaudio
@@ -283,6 +284,10 @@ def main(config):
     val_num_workers = config_int(config, "training", "val_num_workers", 0)
     pin_memory = config_bool(config, "training", "pin_memory", True)
     max_steps = config_int(config, "training", "max_steps", 50000)
+    debug_max_steps = os.environ.get("DEBUG_MAX_STEPS")
+    if debug_max_steps is not None:
+        max_steps = config_int({"training": {"max_steps": debug_max_steps}}, "training", "max_steps", max_steps)
+    debug_timing = os.environ.get("DEBUG_TIMING", "0").lower() in {"1", "true", "yes"}
     pretrain_mel_steps = config_int(config, "training", "pretrain_mel_steps", 0)
     mel_loss_coeff = config_float(config, "training", "mel_loss_coeff", 45.0)
     mrd_loss_coeff = config_float(config, "training", "mrd_loss_coeff", 1.0)
@@ -462,16 +467,46 @@ def main(config):
     else:
         pbar = None
 
-    batch = next(iter(train_loader))
+    timing_path = logs_dir / f"debug_timing_rank_{rank}.csv"
+    timing_file = timing_path.open("w") if debug_timing else None
+    if timing_file is not None:
+        timing_file.write("step,stage,seconds\n")
+        timing_file.flush()
+
+    def record_timing(stage, start_time):
+        if timing_file is None:
+            return
+        elapsed = time.perf_counter() - start_time
+        timing_file.write(f"{global_step},{stage},{elapsed:.9f}\n")
+        timing_file.flush()
+
+    class TimedDataIterator:
+        def __init__(self, iterable):
+            self.iterable = iter(iterable)
+
+        def __iter__(self):
+            return self
+
+        def __next__(self):
+            data_start = time.perf_counter()
+            batch = next(self.iterable)
+            record_timing("data_loading", data_start)
+            return batch
+
+    data_iter = TimedDataIterator(train_loader)
 
     # Sanity check for batch shape
     if rank == 0:
         print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
 
-    while global_step < max_steps:  
-        for batch in train_loader:
+    while global_step < max_steps:
+        step_start = time.perf_counter()
+        for batch in data_iter:
             #print(f"Entered training loop step {global_step}", flush=True)
+            transfer_start = time.perf_counter()
             audio_input = batch["audio"].to(device)  # [B, C, T]
+            torch.cuda.synchronize()
+            record_timing("cuda_transfer", transfer_start)
 
             # match Lightning behavior
             train_discriminator = global_step >= pretrain_mel_steps
@@ -490,10 +525,12 @@ def main(config):
             if train_discriminator:
                 opt_disc.zero_grad(set_to_none=True)
 
+                model_start = time.perf_counter()
                 with torch.no_grad():
                     out = model(audio_input, bandwidth=bandwidth)
                     codes = out["codes"]
                     audio_hat = out["audio"]
+                record_timing("discriminator_model_forward", model_start)
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
@@ -523,6 +560,7 @@ def main(config):
 
                     loss_disc = loss_mp + mrd_loss_coeff * loss_mrd + loss_dac
 
+                backward_start = time.perf_counter()
                 if scaler is not None:
                     scaler.scale(loss_disc).backward()
                     scaler.unscale_(opt_disc)
@@ -532,75 +570,78 @@ def main(config):
                     loss_disc.backward()
                     torch.nn.utils.clip_grad_norm_(disc_params, grad_clip_norm)
                     opt_disc.step()
+                record_timing("discriminator_backward_and_step", backward_start)
 
             # ==================================================
             # GENERATOR STEP
             # ==================================================
             opt_gen.zero_grad()
+            model_start = time.perf_counter()
             with autocast(device_type=device.type, enabled=use_amp):
                 out = model(audio_input, bandwidth=bandwidth)
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
-                if global_step % 10 == 0:
-                    if not torch.isfinite(commit_loss):
-                        raise RuntimeError(f"BAD COMMIT LOSS at step {global_step}")
-                        
-                    if not torch.isfinite(audio_hat).all():
-                        raise RuntimeError(f"BAD AUDIO_HAT at step {global_step}")
+            record_timing("generator_model_forward", model_start)
+            if global_step % 10 == 0:
+                if not torch.isfinite(commit_loss):
+                    raise RuntimeError(f"BAD COMMIT LOSS at step {global_step}")
 
-                if train_discriminator:
-                    loss_dac_1_total = 0.0
-                    loss_dac_2_total = 0.0
-                    loss_gen_mp_total = 0.0
-                    loss_fm_mp_total = 0.0
-                    loss_gen_mrd_total = 0.0
-                    loss_fm_mrd_total = 0.0
+                if not torch.isfinite(audio_hat).all():
+                    raise RuntimeError(f"BAD AUDIO_HAT at step {global_step}")
 
-                    # Keep the DAC adversarial and feature-matching losses in float32.
-                    # The feature-matching term (loss_dac_2) was observed to become non-finite under AMP.
-                    with autocast(device_type=device.type, enabled=False):
-                        loss_dac_1, loss_dac_2 = dac_loss.generator_loss(
-                            audio_hat.float(), audio_input.float()
-                        )
-                    loss_dac_1_total += loss_dac_1
-                    loss_dac_2_total += loss_dac_2
+            if train_discriminator:
+                loss_dac_1_total = 0.0
+                loss_dac_2_total = 0.0
+                loss_gen_mp_total = 0.0
+                loss_fm_mp_total = 0.0
+                loss_gen_mrd_total = 0.0
+                loss_fm_mrd_total = 0.0
 
-                    _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input, y_hat=audio_hat)
-                    loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
-                    loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
-                    loss_gen_mp_total += loss_gen_mp
+                # Keep the DAC adversarial and feature-matching losses in float32.
+                # The feature-matching term (loss_dac_2) was observed to become non-finite under AMP.
+                with autocast(device_type=device.type, enabled=False):
+                    loss_dac_1, loss_dac_2 = dac_loss.generator_loss(
+                        audio_hat.float(), audio_input.float()
+                    )
+                loss_dac_1_total += loss_dac_1
+                loss_dac_2_total += loss_dac_2
 
-                    loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
-                    loss_fm_mp_total += loss_fm_mp
+                _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input, y_hat=audio_hat)
+                loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
+                loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
+                loss_gen_mp_total += loss_gen_mp
 
-                    # Keep the MRD spectrogram/discriminator and its losses in float32.
-                    with autocast(device_type=device.type, enabled=False):
-                        _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(
-                            y=audio_input.float(), y_hat=audio_hat.float()
-                        )
-                        loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
-                        loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
-                        loss_fm_mrd = feat_match_loss_fn(
-                            fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd
-                        ) / len(fmap_rs_mrd)
+                loss_fm_mp = feat_match_loss_fn(fmap_r=fmap_rs_mp, fmap_g=fmap_gs_mp) / len(fmap_rs_mp)
+                loss_fm_mp_total += loss_fm_mp
 
-                    loss_gen_mrd_total += loss_gen_mrd
-                    loss_fm_mrd_total += loss_fm_mrd
-                    loss_dac_1 = loss_dac_1_total
-                    loss_dac_2 = loss_dac_2_total
-                    loss_gen_mp = loss_gen_mp_total
-                    loss_fm_mp = loss_fm_mp_total
-                    loss_gen_mrd = loss_gen_mrd_total
-                    loss_fm_mrd = loss_fm_mrd_total
+                # Keep the MRD spectrogram/discriminator and its losses in float32.
+                with autocast(device_type=device.type, enabled=False):
+                    _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(
+                        y=audio_input.float(), y_hat=audio_hat.float()
+                    )
+                    loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
+                    loss_gen_mrd = loss_gen_mrd / len(list_loss_gen_mrd)
+                    loss_fm_mrd = feat_match_loss_fn(
+                        fmap_r=fmap_rs_mrd, fmap_g=fmap_gs_mrd
+                    ) / len(fmap_rs_mrd)
 
-                else:
-                    # pretraining phase
-                    loss_gen_mp = 0
-                    loss_gen_mrd = 0
-                    loss_fm_mp = 0
-                    loss_fm_mrd = 0
-                    loss_dac_1 = 0
-                    loss_dac_2 = 0
+                loss_gen_mrd_total += loss_gen_mrd
+                loss_fm_mrd_total += loss_fm_mrd
+                loss_dac_1 = loss_dac_1_total
+                loss_dac_2 = loss_dac_2_total
+                loss_gen_mp = loss_gen_mp_total
+                loss_fm_mp = loss_fm_mp_total
+                loss_gen_mrd = loss_gen_mrd_total
+                loss_fm_mrd = loss_fm_mrd_total
+
+            else:
+                # pretraining phase
+                loss_gen_mp = 0
+                loss_gen_mrd = 0
+                loss_fm_mp = 0
+                loss_fm_mrd = 0
+                loss_dac_1 = 0
+                loss_dac_2 = 0
 
             if not torch.isfinite(audio_hat).all():
                 raise RuntimeError(
@@ -688,6 +729,7 @@ def main(config):
                     f"loss_gen became non-finite at step {global_step}"
                 )
 
+            backward_start = time.perf_counter()
             if scaler is not None:
                 scaler.scale(loss_gen).backward()
                 scaler.unscale_(opt_gen)
@@ -698,6 +740,8 @@ def main(config):
                 loss_gen.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 opt_gen.step()
+            record_timing("generator_backward_and_step", backward_start)
+            record_timing("full_step", step_start)
 
             global_step += 1
 
@@ -878,6 +922,8 @@ def main(config):
                             if rank == 0:
                                 print(f"Reached max steps {max_steps}. Exiting training loop.", flush=True)
                             break
+    if timing_file is not None:
+        timing_file.close()
     if rank == 0:
         writer.close()
         print("Training completed successfully!")
