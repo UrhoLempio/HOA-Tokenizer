@@ -2,7 +2,7 @@
 #SBATCH --job-name=foa_multinode_test_run
 #SBATCH --account=project_2013256
 #SBATCH --partition=gpularge
-#SBATCH --time=00:10:00
+#SBATCH --time=01:00:00
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1
 #SBATCH --cpus-per-task=64
@@ -33,7 +33,7 @@ export NCCL_DEBUG_SUBSYS=INIT,COLL
 export TORCH_DISTRIBUTED_DEBUG=DETAIL
 
 # Limit the diagnostic run while retaining the normal training behavior.
-export DEBUG_MAX_STEPS=100
+export DEBUG_MAX_STEPS=1000
 export DEBUG_TIMING=1
 
 echo "Running on $(hostname)"
