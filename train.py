@@ -476,6 +476,8 @@ def main(config):
     def record_timing(stage, start_time):
         if timing_file is None:
             return
+        if device.type == "cuda":
+            torch.cuda.synchronize(device)
         elapsed = time.perf_counter() - start_time
         timing_file.write(f"{global_step},{stage},{elapsed:.9f}\n")
         timing_file.flush()
@@ -494,18 +496,17 @@ def main(config):
             return batch
 
     data_iter = TimedDataIterator(train_loader)
-
-    # Sanity check for batch shape
-    if rank == 0:
-        print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
+    batch_shape_reported = False
 
     while global_step < max_steps:
-        step_start = time.perf_counter()
         for batch in data_iter:
+            step_start = time.perf_counter()
             #print(f"Entered training loop step {global_step}", flush=True)
+            if rank == 0 and not batch_shape_reported:
+                print(f"batch['audio'].shape: {batch['audio'].shape} Expecting [B, C, T] with C={in_channels} channels")
+                batch_shape_reported = True
             transfer_start = time.perf_counter()
             audio_input = batch["audio"].to(device)  # [B, C, T]
-            torch.cuda.synchronize()
             record_timing("cuda_transfer", transfer_start)
 
             # match Lightning behavior

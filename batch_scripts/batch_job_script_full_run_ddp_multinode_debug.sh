@@ -76,7 +76,7 @@ srun --ntasks-per-node=1 --label bash -c '
   fi
 
   wait
-' "$LOGDIR" &
+' _ "$LOGDIR" &
 MONITOR_PID=$!
 
 ###########################################################
