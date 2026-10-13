@@ -53,7 +53,8 @@ mkdir -p "$LOGDIR"
 ###########################################################
 
 # GPU utilization and memory statistics, one monitor process per node.
-srun --ntasks-per-node=1 --label bash -c '
+# The monitor and training are separate steps sharing the same allocation.
+srun --overlap --ntasks="$SLURM_NNODES" --ntasks-per-node=1 --cpus-per-task=1 --label bash -c '
   echo "Node $(hostname) monitor started: $(date)"
   nvidia-smi \
     --query-gpu=timestamp,index,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw \
@@ -83,7 +84,7 @@ MONITOR_PID=$!
 # Training
 ###########################################################
 
-srun torchrun \
+srun --overlap torchrun \
     --nnodes=$SLURM_NNODES \
     --nproc_per_node=4 \
     --node-rank=$SLURM_NODEID \

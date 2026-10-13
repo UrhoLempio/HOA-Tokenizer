@@ -214,7 +214,8 @@ checkpoints/
 generator_samples
 logs/
 val_samples/
-
+slurm-*.out
+slurm-*.err
 # Test files
 test_data/
 
