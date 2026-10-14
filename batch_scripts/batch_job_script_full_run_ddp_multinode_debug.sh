@@ -27,14 +27,14 @@ export PYTHONUNBUFFERED=1
 export MASTER_ADDR=$(scontrol show hostnames "$SLURM_JOB_NODELIST" | head -n 1)
 export MASTER_PORT=29500
 
-# NCCL and Torch distributed diagnostics
-export NCCL_DEBUG=INFO
-export NCCL_DEBUG_SUBSYS=INIT,COLL
-export TORCH_DISTRIBUTED_DEBUG=DETAIL
+# Keep diagnostic logging quiet so the Slurm output stays readable.
+export NCCL_DEBUG=WARN
+unset NCCL_DEBUG_SUBSYS
+unset TORCH_DISTRIBUTED_DEBUG
 
 # Limit the diagnostic run while retaining the normal training behavior.
 export DEBUG_MAX_STEPS=1000
-export DEBUG_TIMING=1
+export DEBUG_TIMING=0
 
 echo "Running on $(hostname)"
 echo "Job ID: $SLURM_JOB_ID"
@@ -45,40 +45,68 @@ nvidia-smi
 echo "NODE:$HOSTNAME RANK:$SLURM_PROCID LOCAL_RANK:$LOCAL_RANK WORLD_SIZE:$WORLD_SIZE"
 
 # Create logging directory
-LOGDIR="profiling_${SLURM_JOB_ID}"
+LOGDIR="${SLURM_SUBMIT_DIR:-$PWD}/profiling_${SLURM_JOB_ID}"
 mkdir -p "$LOGDIR"
 
 ###########################################################
 # Monitoring (runs in background)
 ###########################################################
 
-# GPU utilization and memory statistics, one monitor process per node.
-# The monitor and training are separate steps sharing the same allocation.
-srun --overlap --ntasks="$SLURM_NNODES" --ntasks-per-node=1 --cpus-per-task=1 --label bash -c '
-  echo "Node $(hostname) monitor started: $(date)"
-  nvidia-smi \
-    --query-gpu=timestamp,index,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw \
-    --format=csv \
-    -l 5 > "${1}/gpu_stats_$(hostname).csv" &
-  GPUSTAT_PID=$!
+# Record one GPU-utility sample per second on every node. Separate Slurm output
+# files make failures visible even if a node cannot access the shared log path.
+srun --overlap \
+    --ntasks="$SLURM_NNODES" \
+    --ntasks-per-node=1 \
+    --cpus-per-task=1 \
+    --gres=gpu:gh200:4 \
+    --label \
+    --output="$LOGDIR/monitor_%N.out" \
+    --error="$LOGDIR/monitor_%N.err" \
+    bash -c '
+      set -eu
+      logdir="$1"
+      host=$(hostname)
+      gpu_file="$logdir/gpu_utilization_${host}.csv"
+      ready_file="$logdir/ready_${host}"
+      query="timestamp,index,uuid,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw"
 
-  nvidia-smi dmon -s um -d 5 \
-    > "${1}/gpu_dmon_$(hostname).log" &
-  DMON_PID=$!
+      printf "timestamp,index,uuid,gpu_util_pct,mem_util_pct,mem_used_mib,mem_total_mib,power_w\n" > "$gpu_file"
+      if ! nvidia-smi --query-gpu="$query" --format=csv,noheader,nounits >> "$gpu_file"; then
+        echo "ERROR: initial nvidia-smi query failed on $host" >&2
+        exit 1
+      fi
 
-  vmstat 5 \
-    > "${1}/vmstat_$(hostname).log" &
-  VMSTAT_PID=$!
-
-  if command -v mpstat &> /dev/null; then
-    mpstat -P ALL 5 \
-      > "${1}/cpu_$(hostname).log" &
-    MPSTAT_PID=$!
-  fi
-
-  wait
-' _ "$LOGDIR" &
+      touch "$ready_file"
+      echo "MONITOR_READY host=$host time=$(date -Is) file=$gpu_file"
+      exec nvidia-smi --query-gpu="$query" --format=csv,noheader,nounits --loop=1 >> "$gpu_file"
+    ' _ "$LOGDIR" &
 MONITOR_PID=$!
+
+# Wait briefly for every node to prove that its first GPU sample was written.
+mapfile -t NODE_HOSTS < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
+MONITORS_READY=0
+for attempt in {1..30}; do
+    READY_COUNT=0
+    for node in "${NODE_HOSTS[@]}"; do
+        if [[ -f "$LOGDIR/ready_${node}" ]]; then
+            ((READY_COUNT += 1))
+        fi
+    done
+    if (( READY_COUNT == SLURM_NNODES )); then
+        MONITORS_READY=1
+        break
+    fi
+    sleep 1
+done
+
+if (( MONITORS_READY )); then
+    echo "GPU monitors ready on $READY_COUNT/$SLURM_NNODES nodes."
+else
+    echo "ERROR: GPU monitors ready on $READY_COUNT/$SLURM_NNODES nodes after 30 seconds. Check $LOGDIR/monitor_*.err"
+    kill "$MONITOR_PID" 2>/dev/null
+    wait "$MONITOR_PID" 2>/dev/null
+    exit 1
+fi
 
 ###########################################################
 # Training

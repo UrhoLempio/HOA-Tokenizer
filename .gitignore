@@ -213,6 +213,7 @@ __marimo__/
 checkpoints/
 generator_samples
 logs/
+logs2/
 val_samples/
 slurm-*.out
 slurm-*.err
