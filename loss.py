@@ -147,8 +147,12 @@ class DACGANLoss(nn.Module):
             loss_d += torch.mean((1 - x_real[-1]) ** 2)
         return loss_d
 
-    def generator_loss(self, fake, real):
-        d_fake, d_real = self.forward(fake, real)
+    def generator_loss(self, fake, real, discriminator=None):
+        if discriminator is None:
+            d_fake, d_real = self.forward(fake, real)
+        else:
+            d_fake = discriminator(fake)
+            d_real = discriminator(real)
 
         loss_g = 0
         for x_fake in d_fake:

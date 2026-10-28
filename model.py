@@ -30,7 +30,7 @@ class HOA_WavTokenizer(nn.Module):
                                     compress=2)
         
         self.vq = ResidualVectorQuantizer(dimension=512, 
-                                        n_q=1, bins=1024, 
+                                        n_q=1, bins=4096, 
                                         kmeans_iters=800,
                                         decay=0.99, 
                                         kmeans_init=True)

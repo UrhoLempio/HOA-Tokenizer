@@ -590,6 +590,10 @@ def main(config):
                 if not torch.isfinite(audio_hat).all():
                     raise RuntimeError(f"BAD AUDIO_HAT at step {global_step}")
 
+            discriminator_grad_states = [param.requires_grad for param in disc_params]
+            for param in disc_params:
+                param.requires_grad_(False)
+
             if train_discriminator:
                 loss_dac_1_total = 0.0
                 loss_dac_2_total = 0.0
@@ -602,12 +606,16 @@ def main(config):
                 # The feature-matching term (loss_dac_2) was observed to become non-finite under AMP.
                 with autocast(device_type=device.type, enabled=False):
                     loss_dac_1, loss_dac_2 = dac_loss.generator_loss(
-                        audio_hat.float(), audio_input.float()
+                        audio_hat.float(),
+                        audio_input.float(),
+                        discriminator=disc_dac.module,
                     )
                 loss_dac_1_total += loss_dac_1
                 loss_dac_2_total += loss_dac_2
 
-                _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd(y=audio_input, y_hat=audio_hat)
+                _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd.module(
+                    y=audio_input, y_hat=audio_hat
+                )
                 loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
                 loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
                 loss_gen_mp_total += loss_gen_mp
@@ -617,7 +625,7 @@ def main(config):
 
                 # Keep the MRD spectrogram/discriminator and its losses in float32.
                 with autocast(device_type=device.type, enabled=False):
-                    _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd(
+                    _, gen_mrd, fmap_rs_mrd, fmap_gs_mrd = disc_mrd.module(
                         y=audio_input.float(), y_hat=audio_hat.float()
                     )
                     loss_gen_mrd, list_loss_gen_mrd = gen_loss_fn(gen_mrd)
@@ -742,6 +750,8 @@ def main(config):
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 opt_gen.step()
             record_timing("generator_backward_and_step", backward_start)
+            for param, requires_grad in zip(disc_params, discriminator_grad_states):
+                param.requires_grad_(requires_grad)
             record_timing("full_step", step_start)
 
             global_step += 1
