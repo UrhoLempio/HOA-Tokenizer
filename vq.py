@@ -630,18 +630,10 @@ class ResidualVectorQuantizer(nn.Module):
 
 
         bw_per_q = self.get_bandwidth_per_quantizer(frame_rate)
-        n_q = self.get_num_quantizers_for_bandwidth(frame_rate, bandwidth)
-        # assert n_q==4
-        # breakpoint()
-        # nq_choice=[3,4,8]
-        nq_choice=[4,6,8]
-        if self.training:
-            # choice = int(torch.randint(0, 3, (1,)).item())
-            choice = int(torch.randint(0, 3, (1,)).item())
-        # breakpoint()
-            n_q=nq_choice[choice]
-        # breakpoint()
-        # n_q=8
+        n_q = min(
+            self.get_num_quantizers_for_bandwidth(frame_rate, bandwidth),
+            self.n_q,
+        )
         quantized, codes, commit_loss = self.vq(x, n_q=n_q)
         bw = torch.tensor(n_q * bw_per_q).to(x)
         return QuantizedResult(quantized, codes, bw, loss=torch.mean(commit_loss))

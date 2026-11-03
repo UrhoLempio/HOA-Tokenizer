@@ -1,4 +1,5 @@
 import os
+from functools import partial
 
 from torch.utils.data import DataLoader
 import webdataset as wds
@@ -26,10 +27,14 @@ def set_target_channels(num_channels: int):
     TARGET_CHANNELS = max(1, int(num_channels))
 
 
-num_samples = 240000 #12800 for quick test, 240000 for full length
+DEFAULT_NUM_SAMPLES = 240000
 
 
-def preprocess(sample, target_channels: int = 4):   
+def preprocess(
+    sample,
+    target_channels: int = 4,
+    num_samples: int = DEFAULT_NUM_SAMPLES,
+):
     try:
         audio_bytes = sample["wav"]
         target_channels = max(1, int(target_channels))
@@ -69,8 +74,12 @@ def preprocess(sample, target_channels: int = 4):
         print(f"Error processing sample: {e}")
         return None
 
-def preprocess_target_channels(sample):
-    return preprocess(sample, target_channels=TARGET_CHANNELS)
+def preprocess_target_channels(sample, num_samples: int = DEFAULT_NUM_SAMPLES):
+    return preprocess(
+        sample,
+        target_channels=TARGET_CHANNELS,
+        num_samples=num_samples,
+    )
 
 def get_dataloaders(
     train_dir,
@@ -81,7 +90,15 @@ def get_dataloaders(
     val_num_workers=0,
     pin_memory=True,
     target_channels=4,
+    num_samples=DEFAULT_NUM_SAMPLES,
 ):
+    if num_samples <= 0:
+        raise ValueError(f"num_samples must be positive, got {num_samples}")
+    preprocess_sample = partial(
+        preprocess_target_channels,
+        num_samples=num_samples,
+    )
+
     train_shard_paths = sorted(glob.glob(f"{train_dir}/*.tar"))
     if not train_shard_paths:
         raise FileNotFoundError(
@@ -105,7 +122,7 @@ def get_dataloaders(
         )
     train_dataset = (
         wds.WebDataset(train_shard_paths, shardshuffle=200, nodesplitter=lambda src: src) #shardshuffle=1000 for more randomness
-        .map(preprocess_target_channels)
+        .map(preprocess_sample)
         .shuffle(200)
         .repeat()
     )
@@ -127,7 +144,7 @@ def get_dataloaders(
 
     val_dataset = (
         wds.WebDataset(test_shard_paths, shardshuffle=False, nodesplitter=lambda src: src)
-        .map(preprocess_target_channels)
+        .map(preprocess_sample)
     )
 
     val_loader = DataLoader(

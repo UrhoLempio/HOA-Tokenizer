@@ -283,6 +283,15 @@ def main(config):
     train_num_workers = config_int(config, "training", "train_num_workers", 0)
     val_num_workers = config_int(config, "training", "val_num_workers", 0)
     pin_memory = config_bool(config, "training", "pin_memory", True)
+    segment_duration_seconds = config_float(
+        config, "training", "segment_duration_seconds", 10.0
+    )
+    if segment_duration_seconds <= 0:
+        raise ValueError(
+            "Expected a positive value for training.segment_duration_seconds, "
+            f"got {segment_duration_seconds}"
+        )
+    segment_num_samples = round(segment_duration_seconds * 24000)
     max_steps = config_int(config, "training", "max_steps", 50000)
     debug_max_steps = os.environ.get("DEBUG_MAX_STEPS")
     if debug_max_steps is not None:
@@ -336,6 +345,7 @@ def main(config):
         val_num_workers=val_num_workers,
         pin_memory=pin_memory,
         target_channels=in_channels,
+        num_samples=segment_num_samples,
     )
 
     # Model
@@ -449,6 +459,36 @@ def main(config):
 
     else:
         global_step = 0
+
+    scheduler_steps = max(1, max_steps - global_step)
+    scheduler_gen = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt_gen,
+        T_max=scheduler_steps,
+        eta_min=0.0,
+    )
+    scheduler_disc = torch.optim.lr_scheduler.CosineAnnealingLR(
+        opt_disc,
+        T_max=scheduler_steps,
+        eta_min=0.0,
+    )
+    if resume_path is not None and resume_path.exists():
+        if ckpt.get("scheduler_gen") is not None:
+            scheduler_gen.load_state_dict(ckpt["scheduler_gen"])
+            for param_group, lr in zip(opt_gen.param_groups, scheduler_gen.get_last_lr()):
+                param_group["lr"] = lr
+        if ckpt.get("scheduler_disc") is not None:
+            scheduler_disc.load_state_dict(ckpt["scheduler_disc"])
+            for param_group, lr in zip(opt_disc.param_groups, scheduler_disc.get_last_lr()):
+                param_group["lr"] = lr
+        if rank == 0:
+            if ckpt.get("scheduler_gen") is None or ckpt.get("scheduler_disc") is None:
+                print(
+                    "Checkpoint has no cosine scheduler state; starting cosine decay "
+                    f"from the restored learning rate over {scheduler_steps} remaining steps.",
+                    flush=True,
+                )
+            else:
+                print("Restored cosine scheduler states from checkpoint.", flush=True)
 
     # Initialize TensorBoard writer
     if rank == 0:
@@ -571,6 +611,7 @@ def main(config):
                     loss_disc.backward()
                     torch.nn.utils.clip_grad_norm_(disc_params, grad_clip_norm)
                     opt_disc.step()
+                scheduler_disc.step()
                 record_timing("discriminator_backward_and_step", backward_start)
 
             # ==================================================
@@ -749,6 +790,7 @@ def main(config):
                 loss_gen.backward()
                 torch.nn.utils.clip_grad_norm_(model.parameters(), grad_clip_norm)
                 opt_gen.step()
+            scheduler_gen.step()
             record_timing("generator_backward_and_step", backward_start)
             for param, requires_grad in zip(disc_params, discriminator_grad_states):
                 param.requires_grad_(requires_grad)
@@ -783,6 +825,8 @@ def main(config):
                                         "disc_dac": disc_dac.module.state_dict(),
                                         "opt_gen": opt_gen.state_dict(),
                                         "opt_disc": opt_disc.state_dict(),
+                                        "scheduler_gen": scheduler_gen.state_dict(),
+                                        "scheduler_disc": scheduler_disc.state_dict(),
                                         "scaler": scaler.state_dict() if scaler is not None else None,
                                         "step": global_step,
                                         "best_val_loss": best_val_loss,
@@ -825,6 +869,8 @@ def main(config):
                 )
                 writer.add_scalar("loss/train_gen", loss_gen.item(), global_step)
                 writer.add_scalar("loss/train_disc", loss_disc.item(), global_step)
+                writer.add_scalar("learning_rate/generator", scheduler_gen.get_last_lr()[0], global_step)
+                writer.add_scalar("learning_rate/discriminator", scheduler_disc.get_last_lr()[0], global_step)
                 writer.add_scalar("loss/mel", mel_loss.item(), global_step)
                 writer.add_scalar("loss/commit", commit_loss.item(), global_step)
                 writer.add_scalar("loss/gen_mp", loss_gen_mp, global_step)
@@ -858,13 +904,13 @@ def main(config):
                     
                     writer.add_scalar(
                     f"vq/utilization_q{q}",
-                    active_codes / 1024.0,
+                    active_codes / 4096,
                     global_step,
                     )
                     
                     writer.add_scalar(
                     f"vq/dead_codes_q{q}",
-                    1024 - active_codes,
+                    4096 - active_codes,
                     global_step,
                     )
 
@@ -877,6 +923,8 @@ def main(config):
                     "disc_dac": disc_dac.module.state_dict(),
                     "opt_gen": opt_gen.state_dict(),
                     "opt_disc": opt_disc.state_dict(),
+                    "scheduler_gen": scheduler_gen.state_dict(),
+                    "scheduler_disc": scheduler_disc.state_dict(),
                     "scaler": scaler.state_dict() if scaler is not None else None,
                     "step": global_step,
                     "best_val_loss": best_val_loss,

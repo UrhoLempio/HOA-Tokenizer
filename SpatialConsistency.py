@@ -117,7 +117,7 @@ class SpatialConsistency:
                  energy_weighting: bool = False,
                  diffuseness_weighting: bool = True,
                  energy_threshold: float = 1e-6,
-                 diffuseness_threshold: float = 0.5):
+                 diffuseness_threshold: float = 0.95):
         """
         Initialize the spatial consistency calculator.
         
