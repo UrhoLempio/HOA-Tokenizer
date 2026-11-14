@@ -91,8 +91,8 @@ class DiscriminatorLoss(nn.Module):
             r_loss = torch.mean(torch.clamp(1 - dr, min=0))
             g_loss = torch.mean(torch.clamp(1 + dg, min=0))
             loss += r_loss + g_loss
-            r_losses.append(r_loss.item())
-            g_losses.append(g_loss.item())
+            r_losses.append(r_loss)
+            g_losses.append(g_loss)
 
         return loss, r_losses, g_losses
 
