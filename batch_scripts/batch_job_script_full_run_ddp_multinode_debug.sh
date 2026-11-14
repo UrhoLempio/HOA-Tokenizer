@@ -42,7 +42,7 @@ echo "Started: $(date)"
 
 nvidia-smi
 
-echo "NODE:$HOSTNAME RANK:$SLURM_PROCID LOCAL_RANK:$LOCAL_RANK WORLD_SIZE:$WORLD_SIZE"
+echo "NODE:$HOSTNAME SLURM_PROCID:${SLURM_PROCID:-unset} SLURM_NODEID:${SLURM_NODEID:-unset} SLURM_NNODES:${SLURM_NNODES:-unset}"
 
 # Create logging directory
 LOGDIR="${SLURM_SUBMIT_DIR:-$PWD}/profiling_${SLURM_JOB_ID}"

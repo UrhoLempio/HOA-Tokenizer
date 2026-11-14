@@ -30,7 +30,7 @@ echo "Running on $(hostname)"
 nvidia-smi
 
 #debugging information for distributed training
-echo "NODE:$HOSTNAME RANK:$SLURM_PROCID LOCAL_RANK:$LOCAL_RANK WORLD_SIZE:$WORLD_SIZE"
+echo "NODE:$HOSTNAME SLURM_PROCID:${SLURM_PROCID:-unset} SLURM_NODEID:${SLURM_NODEID:-unset} SLURM_NNODES:${SLURM_NNODES:-unset}"
 
 srun torchrun \
     --nnodes=$SLURM_NNODES \

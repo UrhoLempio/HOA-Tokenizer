@@ -290,9 +290,6 @@ class SpatialConsistency:
 
         valid_mask = energy_mask & direction_mask_ref & diffuse_mask
         mask_ratio = valid_mask.float().mean()
-        if not torch.any(valid_mask):
-            zero = torch.zeros((), device=ref_energy.device, dtype=ref_energy.dtype)
-            return zero, torch.zeros_like(zero)
 
         cosine_sim = torch.zeros_like(dot_products)
         denom = torch.clamp(ref_norm * target_norm, min=eps)

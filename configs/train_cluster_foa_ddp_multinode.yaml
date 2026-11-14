@@ -21,6 +21,7 @@ training:
   segment_duration_seconds: 3
   pin_memory: true
   lr: 2e-4
+  precision: bf16
   mel_loss_coeff: 45.0
   mrd_loss_coeff: 1.0
   bandwidth: 6.6

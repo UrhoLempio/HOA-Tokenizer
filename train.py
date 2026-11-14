@@ -16,7 +16,7 @@ from angular_error import angular_error
 from dataloader import get_dataloaders, set_audio_loader, set_target_channels
 from SpatialConsistency import SpatialConsistency, estimate_direction_of_arrival
 from torch.utils.tensorboard import SummaryWriter
-from torch.amp import autocast, GradScaler
+from torch.amp import autocast
 from torch.nn.parallel import DistributedDataParallel as DDP
 
 # TQDM switch since cluster terminals may not support it. Use config to set this.
@@ -313,14 +313,22 @@ def main(config):
     sample_every = config_int(config, "training", "sample_every", save_every)
     max_checkpoints = config_int(config, "training", "max_checkpoints", 5)
     learning_rate = config_float(config, "training", "lr", 2e-4)
+    precision = str(config.get("training", {}).get("precision", "fp32")).lower()
+    if precision not in {"fp32", "bf16"}:
+        raise ValueError(f"training.precision must be 'fp32' or 'bf16', got {precision!r}")
 
     # Device setup
     rank, local_rank, world_size = setup_ddp()
     device = torch.device(f"cuda:{local_rank}")
+    if precision == "bf16" and not torch.cuda.is_bf16_supported():
+        raise RuntimeError("training.precision='bf16' requires a CUDA device with BF16 support.")
+    amp_dtype = torch.bfloat16
+    use_amp = precision == "bf16"
     print(
         f"rank={rank}, "
         f"local_rank={local_rank}, "
-        f"world_size={world_size}",
+        f"world_size={world_size}, "
+        f"precision={precision}",
         flush=True
     )
 
@@ -390,9 +398,8 @@ def main(config):
         disc_params += list(d.parameters())
     opt_disc = torch.optim.AdamW(disc_params, lr=learning_rate)
 
-    # AMP
-    use_amp = False
-    scaler = GradScaler(device.type) if use_amp else None
+    # BF16 does not require gradient scaling.
+    scaler = None
 
     # Checkpoint loading
     resume_path = None
@@ -568,17 +575,30 @@ def main(config):
 
                 model_start = time.perf_counter()
                 with torch.no_grad():
-                    out = model(audio_input, bandwidth=bandwidth)
+                    with autocast(
+                        device_type=device.type,
+                        dtype=amp_dtype,
+                        enabled=use_amp,
+                    ):
+                        out = model(audio_input, bandwidth=bandwidth)
                     codes = out["codes"]
                     audio_hat = out["audio"]
                 record_timing("discriminator_model_forward", model_start)
                 loss_dac_total = 0.0
                 loss_mp_total = 0.0
                 loss_mrd_total = 0.0
-                with autocast(device_type=device.type, enabled=use_amp):
+                with autocast(device_type=device.type, enabled=False):
                     # TODO change the discriminators for four channels instead
-                    loss_dac_total += dac_loss.discriminator_loss(audio_hat, audio_input)
-                    
+                    loss_dac_total = dac_loss.discriminator_loss(
+                        audio_hat.float(),
+                        audio_input.float(),
+                    )
+
+                with autocast(
+                    device_type=device.type,
+                    dtype=amp_dtype,
+                    enabled=use_amp,
+                ):
                     real_mp, gen_mp, _, _ = disc_mpd(y=audio_input, y_hat=audio_hat)
                     loss_mp, loss_mp_real, _ = disc_loss_fn(
                         disc_real_outputs=real_mp,
@@ -587,7 +607,11 @@ def main(config):
                     loss_mp = loss_mp / len(loss_mp_real)
                     loss_mp_total += loss_mp
 
-                    real_mrd, gen_mrd, _, _ = disc_mrd(y=audio_input, y_hat=audio_hat)
+                with autocast(device_type=device.type, enabled=False):
+                    real_mrd, gen_mrd, _, _ = disc_mrd(
+                        y=audio_input.float(),
+                        y_hat=audio_hat.float(),
+                    )
                     loss_mrd, loss_mrd_real, _ = disc_loss_fn(
                         disc_real_outputs=real_mrd,
                         disc_generated_outputs=gen_mrd,
@@ -617,20 +641,17 @@ def main(config):
             # ==================================================
             # GENERATOR STEP
             # ==================================================
-            opt_gen.zero_grad()
+            opt_gen.zero_grad(set_to_none=True)
             model_start = time.perf_counter()
-            with autocast(device_type=device.type, enabled=use_amp):
+            with autocast(
+                device_type=device.type,
+                dtype=amp_dtype,
+                enabled=use_amp,
+            ):
                 out = model(audio_input, bandwidth=bandwidth)
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
             record_timing("generator_model_forward", model_start)
-            if global_step % 10 == 0:
-                if not torch.isfinite(commit_loss):
-                    raise RuntimeError(f"BAD COMMIT LOSS at step {global_step}")
-
-                if not torch.isfinite(audio_hat).all():
-                    raise RuntimeError(f"BAD AUDIO_HAT at step {global_step}")
-
             discriminator_grad_states = [param.requires_grad for param in disc_params]
             for param in disc_params:
                 param.requires_grad_(False)
@@ -654,9 +675,15 @@ def main(config):
                 loss_dac_1_total += loss_dac_1
                 loss_dac_2_total += loss_dac_2
 
-                _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd.module(
-                    y=audio_input, y_hat=audio_hat
-                )
+                with autocast(
+                    device_type=device.type,
+                    dtype=amp_dtype,
+                    enabled=use_amp,
+                ):
+                    _, gen_mp, fmap_rs_mp, fmap_gs_mp = disc_mpd.module(
+                        y=audio_input,
+                        y_hat=audio_hat,
+                    )
                 loss_gen_mp, list_loss_gen_mp = gen_loss_fn(gen_mp)
                 loss_gen_mp = loss_gen_mp / len(list_loss_gen_mp)
                 loss_gen_mp_total += loss_gen_mp
@@ -693,10 +720,6 @@ def main(config):
                 loss_dac_1 = 0
                 loss_dac_2 = 0
 
-            if not torch.isfinite(audio_hat).all():
-                raise RuntimeError(
-                    f"audio_hat became non-finite at step {global_step}"
-                )
             # Mel loss
             with autocast(device_type=device.type, enabled=False):
                 mel_loss = mel_loss_fn(audio_hat.float(), audio_input.float())
@@ -739,7 +762,28 @@ def main(config):
                 "spatial_loss": (spatial_loss, spatial_loss_coeff),
             }
 
-            if not torch.isfinite(loss_gen):
+            finite_checks = torch.stack(
+                (
+                    torch.isfinite(audio_hat).all(),
+                    torch.isfinite(mel_loss).all(),
+                    torch.isfinite(spatial_loss).all(),
+                    torch.isfinite(commit_loss).all(),
+                    torch.isfinite(loss_gen).all(),
+                )
+            ).tolist()
+            check_names = (
+                "audio_hat",
+                "mel_loss",
+                "spatial_loss",
+                "commit_loss",
+                "loss_gen",
+            )
+            failed_checks = [
+                name
+                for name, is_finite in zip(check_names, finite_checks)
+                if not is_finite
+            ]
+            if "loss_gen" in failed_checks:
                 debug_values = {}
                 for name, (value, coefficient) in loss_components.items():
                     value_tensor = value if torch.is_tensor(value) else torch.as_tensor(value, device=device)
@@ -759,24 +803,14 @@ def main(config):
                     flush=True,
                 )
 
-            if not torch.isfinite(mel_loss):
-                raise RuntimeError(
-                    f"mel_loss became non-finite at step {global_step}"
+            if failed_checks:
+                failed_names = ", ".join(failed_checks)
+                print(
+                    f"Non-finite {failed_names} at step {global_step}, rank {rank}.",
+                    flush=True,
                 )
-
-            if not torch.isfinite(spatial_loss):
                 raise RuntimeError(
-                    f"spatial_loss became non-finite at step {global_step}"
-                )
-
-            if not torch.isfinite(commit_loss):
-                raise RuntimeError(
-                    f"commit_loss became non-finite at step {global_step}"
-                )
-
-            if not torch.isfinite(loss_gen):
-                raise RuntimeError(
-                    f"loss_gen became non-finite at step {global_step}"
+                    f"Non-finite {failed_names} at step {global_step}"
                 )
 
             backward_start = time.perf_counter()
