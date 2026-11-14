@@ -2,12 +2,15 @@
 #SBATCH --job-name=foa_multinode_test_run
 #SBATCH --account=project_2013256
 #SBATCH --partition=gpularge
-#SBATCH --time=00:10:00
+#SBATCH --time=36:00:00
 #SBATCH --nodes=4
 #SBATCH --ntasks-per-node=1 --cpus-per-task=64
 #SBATCH --gres=gpu:gh200:4  # 4 GPUs per node
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.err
+
+scancel 3054892
+sleep 10
 
 module purge
 module load python-pytorch/2.10
