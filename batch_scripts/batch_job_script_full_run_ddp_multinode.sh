@@ -9,7 +9,7 @@
 #SBATCH --output=slurm-%j.out
 #SBATCH --error=slurm-%j.err
 
-scancel 3054892
+scancel 3087279
 sleep 10
 
 module purge
