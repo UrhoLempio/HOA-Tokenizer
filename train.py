@@ -59,6 +59,13 @@ def compare_codebook_snapshots(expected, actual):
     return [key for key in expected if not torch.equal(expected[key], actual[key])]
 
 
+def sync_ddp_buffers_from_rank0(model: DDP):
+    if not dist.is_available() or not dist.is_initialized():
+        return
+    for buffer in model.module.buffers():
+        dist.broadcast(buffer, src=0)
+
+
 def save_checkpoint_atomically(checkpoint, checkpoint_path, label):
     checkpoint_path = Path(checkpoint_path)
     before_save = codebook_snapshot(checkpoint["model"])
@@ -362,7 +369,8 @@ def main(config):
         model,
         device_ids=[local_rank],
         output_device=local_rank,
-        )
+        broadcast_buffers=False,
+    )
 
     # Optional print of model parameters (74.69M parameters)
     def count_parameters(model):
@@ -652,6 +660,10 @@ def main(config):
                 audio_hat = out["audio"]
                 commit_loss = out["commit_loss"]
             record_timing("generator_model_forward", model_start)
+            # VQ EMA buffers change in this forward; sync once instead of before both forwards.
+            buffer_sync_start = time.perf_counter()
+            sync_ddp_buffers_from_rank0(model)
+            record_timing("model_buffer_sync", buffer_sync_start)
             discriminator_grad_states = [param.requires_grad for param in disc_params]
             for param in disc_params:
                 param.requires_grad_(False)
@@ -749,68 +761,16 @@ def main(config):
                 + spatial_loss_coeff * spatial_loss
             )
 
-            # DEBUG CHECKS
-            loss_components = {
-                "loss_gen_mp": (loss_gen_mp, 1.0),
-                "loss_gen_mrd": (loss_gen_mrd, mrd_loss_coeff),
-                "loss_fm_mp": (loss_fm_mp, 1.0),
-                "loss_fm_mrd": (loss_fm_mrd, mrd_loss_coeff),
-                "mel_loss": (mel_loss, mel_loss_coeff),
-                "commit_loss": (commit_loss, commit_loss_coeff),
-                "loss_dac_1": (loss_dac_1, 1.0),
-                "loss_dac_2": (loss_dac_2, 1.0),
-                "spatial_loss": (spatial_loss, spatial_loss_coeff),
-            }
-
-            finite_checks = torch.stack(
-                (
-                    torch.isfinite(audio_hat).all(),
-                    torch.isfinite(mel_loss).all(),
-                    torch.isfinite(spatial_loss).all(),
-                    torch.isfinite(commit_loss).all(),
-                    torch.isfinite(loss_gen).all(),
-                )
-            ).tolist()
-            check_names = (
-                "audio_hat",
-                "mel_loss",
-                "spatial_loss",
-                "commit_loss",
-                "loss_gen",
-            )
-            failed_checks = [
-                name
-                for name, is_finite in zip(check_names, finite_checks)
-                if not is_finite
-            ]
-            if "loss_gen" in failed_checks:
-                debug_values = {}
-                for name, (value, coefficient) in loss_components.items():
-                    value_tensor = value if torch.is_tensor(value) else torch.as_tensor(value, device=device)
-                    weighted_value = value_tensor * coefficient
-                    debug_values[name] = {
-                        "raw": value_tensor.detach().float().item(),
-                        "coefficient": coefficient,
-                        "weighted": weighted_value.detach().float().item(),
-                        "finite": bool(torch.isfinite(value_tensor).all()),
-                        "weighted_finite": bool(torch.isfinite(weighted_value).all()),
-                    }
-
-                print(
-                    f"NON-FINITE LOSS DEBUG at step {global_step}, rank {rank}: "
-                    f"loss_gen={loss_gen.detach().float().item()} | "
-                    f"components={debug_values}",
-                    flush=True,
-                )
-
-            if failed_checks:
-                failed_names = ", ".join(failed_checks)
-                print(
-                    f"Non-finite {failed_names} at step {global_step}, rank {rank}.",
-                    flush=True,
-                )
-                raise RuntimeError(
-                    f"Non-finite {failed_names} at step {global_step}"
+            for name, value in (
+                ("audio_hat", audio_hat),
+                ("mel_loss", mel_loss),
+                ("spatial_loss", spatial_loss),
+                ("commit_loss", commit_loss),
+                ("loss_gen", loss_gen),
+            ):
+                torch._assert_async(
+                    torch.isfinite(value).all(),
+                    f"Non-finite {name} at step {global_step}, rank {rank}",
                 )
 
             backward_start = time.perf_counter()
@@ -914,15 +874,26 @@ def main(config):
                 writer.add_scalar("loss/discriminators/dac", loss_dac.item(), global_step)
                 writer.add_scalar("loss/feature_matching/mpd", loss_fm_mp.item(), global_step)
                 writer.add_scalar("loss/feature_matching/mrd", loss_fm_mrd.item(), global_step)
-                            
-            if rank == 0 and spatial_loss_coeff != 0.0 and (spatial_loss_every <= 1 or global_step % spatial_loss_every == 0):
-                writer.add_scalar("loss/spatial", spatial_loss.item(), global_step)
-                writer.add_scalar("debug/mask_ratio", mask_ratio.item(), global_step)
-                writer.add_scalar("loss/weighted/mel", (mel_loss_coeff * mel_loss).item(), global_step)
-                writer.add_scalar("loss/weighted/commit", (commit_loss_coeff * commit_loss).item(), global_step)
-                writer.add_scalar("loss/weighted/spatial", (spatial_loss_coeff * spatial_loss).item(), global_step)
-
-
+                if spatial_loss_coeff != 0.0 and (
+                    spatial_loss_every <= 1 or global_step % spatial_loss_every == 0
+                ):
+                    writer.add_scalar("loss/spatial", spatial_loss.item(), global_step)
+                    writer.add_scalar("debug/mask_ratio", mask_ratio.item(), global_step)
+                    writer.add_scalar(
+                        "loss/weighted/mel",
+                        (mel_loss_coeff * mel_loss).item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "loss/weighted/commit",
+                        (commit_loss_coeff * commit_loss).item(),
+                        global_step,
+                    )
+                    writer.add_scalar(
+                        "loss/weighted/spatial",
+                        (spatial_loss_coeff * spatial_loss).item(),
+                        global_step,
+                    )
 
             if rank == 0 and global_step % 200 == 0:    
                 writer.flush()
