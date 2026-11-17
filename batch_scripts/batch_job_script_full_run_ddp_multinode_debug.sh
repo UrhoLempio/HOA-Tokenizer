@@ -32,9 +32,11 @@ export NCCL_DEBUG=WARN
 unset NCCL_DEBUG_SUBSYS
 unset TORCH_DISTRIBUTED_DEBUG
 
-# Limit the diagnostic run while retaining the normal training behavior.
-export DEBUG_MAX_STEPS=1000
-export DEBUG_TIMING=0
+# DEBUG_MAX_STEPS is the absolute target step, not an additional step count.
+# For a step-40000 checkpoint, set DEBUG_MAX_STEPS=40200 before submission
+# to run 200 training steps.
+export DEBUG_MAX_STEPS="${DEBUG_MAX_STEPS:-1000}"
+export DEBUG_TIMING="${DEBUG_TIMING:-0}"
 
 echo "Running on $(hostname)"
 echo "Job ID: $SLURM_JOB_ID"
@@ -44,8 +46,22 @@ nvidia-smi
 
 echo "NODE:$HOSTNAME SLURM_PROCID:${SLURM_PROCID:-unset} SLURM_NODEID:${SLURM_NODEID:-unset} SLURM_NNODES:${SLURM_NNODES:-unset}"
 
-# Create logging directory
-LOGDIR="${SLURM_SUBMIT_DIR:-$PWD}/profiling_${SLURM_JOB_ID}"
+# Keep all outputs unique to this Slurm job and node count.
+RUN_ROOT="${SCALING_OUTPUT_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}/scaling_runs}"
+RUN_NAME="${SLURM_JOB_NAME:-foa_scaling}_${SLURM_NNODES}n_${SLURM_JOB_ID}"
+export HOA_RUN_DIR="${RUN_ROOT}/${RUN_NAME}"
+mkdir -p "$HOA_RUN_DIR"
+
+if [[ -n "${RESUME_CHECKPOINT:-}" ]]; then
+    export HOA_RESUME_CHECKPOINT="$RESUME_CHECKPOINT"
+fi
+
+echo "Run output: $HOA_RUN_DIR"
+echo "Resume checkpoint: ${HOA_RESUME_CHECKPOINT:-auto-resume from this run checkpoint directory}"
+echo "Absolute target step: $DEBUG_MAX_STEPS"
+
+# Keep GPU monitoring files inside the job-specific run directory.
+LOGDIR="$HOA_RUN_DIR/monitoring"
 mkdir -p "$LOGDIR"
 
 ###########################################################

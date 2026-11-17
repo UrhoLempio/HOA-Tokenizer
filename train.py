@@ -279,10 +279,19 @@ def main(config):
 
     train_dir = config["data"]["train_dir"]
     val_dir = config["data"]["val_dir"]
-    checkpoint_dir = Path(config["io"].get("checkpoint_dir", "./checkpoints"))
-    samples_dir = Path(config["io"].get("generator_samples_dir", "./generator_samples"))
-    val_samples_dir = Path(config["io"].get("val_samples_dir", "./val_samples"))
-    logs_dir = Path(config["io"].get("log_dir", "./logs"))
+    io_config = config.get("io", {})
+    run_dir = os.environ.get("HOA_RUN_DIR")
+    if run_dir:
+        run_root = Path(run_dir).expanduser()
+        checkpoint_dir = run_root / "checkpoints"
+        samples_dir = run_root / "generator_samples"
+        val_samples_dir = run_root / "val_samples"
+        logs_dir = run_root / "logs"
+    else:
+        checkpoint_dir = Path(io_config.get("checkpoint_dir", "./checkpoints"))
+        samples_dir = Path(io_config.get("generator_samples_dir", "./generator_samples"))
+        val_samples_dir = Path(io_config.get("val_samples_dir", "./val_samples"))
+        logs_dir = Path(io_config.get("log_dir", "./logs"))
     bandwidth = config_float(config, "model", "bandwidth", 6.6)
     in_channels = config_int(config, "model", "in_channels", 4)
     train_batch_size = config_int(config, "training", "train_batch_size", 2)
@@ -410,12 +419,34 @@ def main(config):
     scaler = None
 
     # Checkpoint loading
-    resume_path = None
-    for candidate in sorted(checkpoint_dir.glob("checkpoint_*.pt"), key=lambda p: p.stat().st_mtime, reverse=True):
-        if candidate.name.startswith("checkpoint_best"):
-            continue
-        resume_path = candidate
-        break
+    configured_resume = (
+        os.environ.get("HOA_RESUME_CHECKPOINT")
+        or io_config.get("resume_checkpoint")
+    )
+    if configured_resume:
+        resume_path = Path(configured_resume).expanduser()
+        if not resume_path.is_file():
+            raise FileNotFoundError(
+                f"Configured resume checkpoint does not exist: {resume_path}"
+            )
+    else:
+        resume_path = None
+        for candidate in sorted(
+            checkpoint_dir.glob("checkpoint_*.pt"),
+            key=lambda path: path.stat().st_mtime,
+            reverse=True,
+        ):
+            if candidate.name.startswith("checkpoint_best"):
+                continue
+            resume_path = candidate
+            break
+    if rank == 0:
+        print(
+            f"Output directories: checkpoints={checkpoint_dir}, "
+            f"samples={samples_dir}, validation={val_samples_dir}, logs={logs_dir}",
+            flush=True,
+        )
+        print(f"Resume checkpoint: {resume_path or 'none (starting from scratch)'}", flush=True)
     best_val_loss = float("inf")
 
     if resume_path is not None and resume_path.exists():
