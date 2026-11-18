@@ -46,7 +46,7 @@ nvidia-smi
 
 echo "NODE:$HOSTNAME SLURM_PROCID:${SLURM_PROCID:-unset} SLURM_NODEID:${SLURM_NODEID:-unset} SLURM_NNODES:${SLURM_NNODES:-unset}"
 
-# Keep all outputs unique to this Slurm job and node count.
+# Keep all training outputs unique to this Slurm job and node count.
 RUN_ROOT="${SCALING_OUTPUT_ROOT:-${SLURM_SUBMIT_DIR:-$PWD}/scaling_runs}"
 RUN_NAME="${SLURM_JOB_NAME:-foa_scaling}_${SLURM_NNODES}n_${SLURM_JOB_ID}"
 export HOA_RUN_DIR="${RUN_ROOT}/${RUN_NAME}"
@@ -60,90 +60,16 @@ echo "Run output: $HOA_RUN_DIR"
 echo "Resume checkpoint: ${HOA_RESUME_CHECKPOINT:-auto-resume from this run checkpoint directory}"
 echo "Absolute target step: $DEBUG_MAX_STEPS"
 
-# Keep GPU monitoring files inside the job-specific run directory.
-LOGDIR="$HOA_RUN_DIR/monitoring"
-mkdir -p "$LOGDIR"
-
-###########################################################
-# Monitoring (runs in background)
-###########################################################
-
-# Record one GPU-utility sample per second on every node. Separate Slurm output
-# files make failures visible even if a node cannot access the shared log path.
-srun --overlap \
-    --ntasks="$SLURM_NNODES" \
+srun --ntasks="$SLURM_NNODES" \
     --ntasks-per-node=1 \
-    --cpus-per-task=1 \
-    --gres=gpu:gh200:4 \
-    --label \
-    --output="$LOGDIR/monitor_%N.out" \
-    --error="$LOGDIR/monitor_%N.err" \
-    bash -c '
-      set -eu
-      logdir="$1"
-      host=$(hostname)
-      gpu_file="$logdir/gpu_utilization_${host}.csv"
-      ready_file="$logdir/ready_${host}"
-      query="timestamp,index,uuid,utilization.gpu,utilization.memory,memory.used,memory.total,power.draw"
-
-      printf "timestamp,index,uuid,gpu_util_pct,mem_util_pct,mem_used_mib,mem_total_mib,power_w\n" > "$gpu_file"
-      if ! nvidia-smi --query-gpu="$query" --format=csv,noheader,nounits >> "$gpu_file"; then
-        echo "ERROR: initial nvidia-smi query failed on $host" >&2
-        exit 1
-      fi
-
-      touch "$ready_file"
-      echo "MONITOR_READY host=$host time=$(date -Is) file=$gpu_file"
-      exec nvidia-smi --query-gpu="$query" --format=csv,noheader,nounits --loop=1 >> "$gpu_file"
-    ' _ "$LOGDIR" &
-MONITOR_PID=$!
-
-# Wait briefly for every node to prove that its first GPU sample was written.
-mapfile -t NODE_HOSTS < <(scontrol show hostnames "$SLURM_JOB_NODELIST")
-MONITORS_READY=0
-for attempt in {1..30}; do
-    READY_COUNT=0
-    for node in "${NODE_HOSTS[@]}"; do
-        if [[ -f "$LOGDIR/ready_${node}" ]]; then
-            ((READY_COUNT += 1))
-        fi
-    done
-    if (( READY_COUNT == SLURM_NNODES )); then
-        MONITORS_READY=1
-        break
-    fi
-    sleep 1
-done
-
-if (( MONITORS_READY )); then
-    echo "GPU monitors ready on $READY_COUNT/$SLURM_NNODES nodes."
-else
-    echo "ERROR: GPU monitors ready on $READY_COUNT/$SLURM_NNODES nodes after 30 seconds. Check $LOGDIR/monitor_*.err"
-    kill "$MONITOR_PID" 2>/dev/null
-    wait "$MONITOR_PID" 2>/dev/null
-    exit 1
-fi
-
-###########################################################
-# Training
-###########################################################
-
-srun --overlap torchrun \
-    --nnodes=$SLURM_NNODES \
-    --nproc_per_node=4 \
-    --node-rank=$SLURM_NODEID \
-    --rdzv_backend=c10d \
-    --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
-    train.py configs/train_cluster_foa_ddp_multinode.yaml
-
-TRAIN_EXIT_CODE=$?
-
-###########################################################
-# Cleanup
-###########################################################
-
-kill "$MONITOR_PID" 2>/dev/null
-wait "$MONITOR_PID" 2>/dev/null
+    --cpus-per-task="$SLURM_CPUS_PER_TASK" \
+    --kill-on-bad-exit=1 \
+    torchrun \
+        --nnodes="$SLURM_NNODES" \
+        --nproc_per_node=4 \
+        --node_rank="$SLURM_NODEID" \
+        --rdzv_backend=c10d \
+        --rdzv_endpoint="$MASTER_ADDR:$MASTER_PORT" \
+        train.py configs/train_cluster_foa_ddp_multinode.yaml
 
 echo "Finished: $(date)"
-exit $TRAIN_EXIT_CODE
